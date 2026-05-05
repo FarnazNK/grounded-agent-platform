@@ -91,13 +91,13 @@ class PIIDetector:
 _INJECTION_PATTERNS: list[re.Pattern[str]] = [
     re.compile(
         r"\bignore\b.{0,30}\b(previous|prior|above)\b.{0,30}\b(instruction|prompt|rule)", re.I
-    ),  # noqa: E501
+    ),
     re.compile(
         r"\bdisregard\b.{0,30}\b(previous|prior|above)\b.{0,30}\b(instruction|prompt|rule)", re.I
-    ),  # noqa: E501
+    ),
     re.compile(
         r"\b(reveal|show|print|leak|disclose).{0,30}\b(system|hidden)\b.{0,30}\bprompt\b", re.I
-    ),  # noqa: E501
+    ),
     re.compile(r"\byou are now\b.{0,40}\b(dan|jailbreak|unrestricted|developer mode)\b", re.I),
     re.compile(
         r"\b(repeat|echo|output)\b.{0,30}\b(verbatim|exactly|word for word)\b"
