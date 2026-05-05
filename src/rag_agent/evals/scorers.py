@@ -117,10 +117,7 @@ class RetrievalRecallScorer:
         hits = [s for s in case.expected_sources if s in retrieved_sources]
         score = len(hits) / len(case.expected_sources)
         passed = score >= self.pass_threshold
-        rationale = (
-            f"retrieved {sorted(retrieved_sources)}, "
-            f"expected {case.expected_sources}"
-        )
+        rationale = f"retrieved {sorted(retrieved_sources)}, expected {case.expected_sources}"
         return ScoreResult(self.name, score, passed, rationale)
 
 

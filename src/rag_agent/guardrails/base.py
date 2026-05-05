@@ -15,9 +15,9 @@ from typing import Protocol
 class GuardrailAction(StrEnum):
     """What the guardrail wants the caller to do."""
 
-    ALLOW = "allow"          # safe; pass through
-    SANITIZE = "sanitize"    # replace `sanitized_text` and continue
-    BLOCK = "block"          # refuse the request
+    ALLOW = "allow"  # safe; pass through
+    SANITIZE = "sanitize"  # replace `sanitized_text` and continue
+    BLOCK = "block"  # refuse the request
 
 
 @dataclass
