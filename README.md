@@ -483,11 +483,6 @@ interview:
   single-agent graph would do, and wanted this project to reflect that
   opinion.
 
----
-
-## License
-
-MIT.
 
 ---
 
