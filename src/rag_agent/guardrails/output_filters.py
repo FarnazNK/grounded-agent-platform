@@ -71,9 +71,7 @@ class SourceCitationChecker:
     def __call__(self, text: str) -> GuardrailDecision:
         cited = {m.group(1).strip() for m in self._CITATION_RE.finditer(text)}
         if not cited:
-            return GuardrailDecision(
-                self.name, GuardrailAction.ALLOW, "no citations to verify"
-            )
+            return GuardrailDecision(self.name, GuardrailAction.ALLOW, "no citations to verify")
         invalid = cited - self.valid_sources
         if invalid:
             return GuardrailDecision(

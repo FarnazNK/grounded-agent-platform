@@ -106,9 +106,9 @@ def test_refuse_path_short_circuits():
 
     state = AgentState.model_validate(result)
     assert state.route == "refuse"
-    assert state.iterations == 0          # never retrieved
+    assert state.iterations == 0  # never retrieved
     assert state.chunks == []
-    assert state.final_answer             # refusal message populated
+    assert state.final_answer  # refusal message populated
 
 
 def test_irrelevant_retrieval_triggers_retry_then_gives_up():

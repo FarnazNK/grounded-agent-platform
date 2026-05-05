@@ -120,7 +120,9 @@ def run_evaluation(
     by_scorer: dict[str, float] = {}
     for scorer in scorers:
         applicable = [
-            s.score for r in results for s in r.scores
+            s.score
+            for r in results
+            for s in r.scores
             if s.scorer_name == scorer.name and not s.rationale.startswith("skipped")
         ]
         by_scorer[scorer.name] = sum(applicable) / len(applicable) if applicable else float("nan")
@@ -151,15 +153,15 @@ def _print_report(console: Console, report: EvalReport) -> None:
     for r in report.results:
         status = "[green]PASS[/green]" if r.passed else "[red]FAIL[/red]"
         score_str = " ".join(
-            f"{s.scorer_name}={s.score:.2f}" for s in r.scores
+            f"{s.scorer_name}={s.score:.2f}"
+            for s in r.scores
             if not s.rationale.startswith("skipped")
         )
         table.add_row(r.case_id, status, f"{r.latency_s:.2f}s", score_str or "-")
 
     console.print(table)
     console.print(
-        f"\n[bold]Summary:[/bold] {report.passed}/{report.total} passed "
-        f"({report.pass_rate:.0%})"
+        f"\n[bold]Summary:[/bold] {report.passed}/{report.total} passed ({report.pass_rate:.0%})"
     )
     for scorer_name, mean in report.by_scorer.items():
         console.print(f"  {scorer_name}: mean={mean:.2f}")

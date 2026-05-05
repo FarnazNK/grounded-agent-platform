@@ -171,9 +171,7 @@ def main() -> int:
     console.print(f"[bold]Dataset:[/bold] {dataset.name} ({len(dataset.cases)} cases)")
 
     selected = (
-        [c for c in CONFIGS if c.name in set(args.configs.split(","))]
-        if args.configs
-        else CONFIGS
+        [c for c in CONFIGS if c.name in set(args.configs.split(","))] if args.configs else CONFIGS
     )
 
     reports: dict[str, EvalReport] = {}
@@ -213,9 +211,7 @@ def _write_comparison(reports: dict[str, EvalReport], console: Console) -> None:
         "|---|---|---|" + "---|" * len(scorer_names),
     ]
     for name, report in reports.items():
-        scorer_cells = [
-            f"{report.by_scorer.get(s, float('nan')):.2f}" for s in scorer_names
-        ]
+        scorer_cells = [f"{report.by_scorer.get(s, float('nan')):.2f}" for s in scorer_names]
         lines.append(
             f"| `{name}` | {report.pass_rate:.0%} | {report.passed}/{report.total} | "
             + " | ".join(scorer_cells)

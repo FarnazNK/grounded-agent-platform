@@ -78,7 +78,8 @@ def _make_rewrite_node():
             return {"rewritten_query": state.query}
 
         history = "\n".join(
-            f"{m.type}: {m.content}" for m in state.messages[-4:]  # last 2 turns
+            f"{m.type}: {m.content}"
+            for m in state.messages[-4:]  # last 2 turns
         )
         rewritten = invoke_with_retry(llm, build_rewrite_prompt(state.query, history))
         log.info(

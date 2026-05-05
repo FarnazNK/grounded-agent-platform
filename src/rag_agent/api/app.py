@@ -159,9 +159,7 @@ def create_app(data_dir: Path | str | None = None) -> FastAPI:
 
         # --- input guardrails ------------------------------------------------
         try:
-            sanitized_query, in_decisions = apply_guardrails(
-                req.query, app.state.input_guardrails
-            )
+            sanitized_query, in_decisions = apply_guardrails(req.query, app.state.input_guardrails)
         except GuardrailViolation as exc:
             GUARDRAIL_BLOCKS.labels(guardrail=exc.decision.guardrail_name).inc()
             REQUESTS.labels(endpoint=endpoint, status="blocked").inc()

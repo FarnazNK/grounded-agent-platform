@@ -43,13 +43,13 @@ class Settings(BaseSettings):
     collection_name: str = "rag_agent_docs"
 
     # --- Retrieval ---
-    top_k_dense: int = 8           # vector search candidates
-    top_k_sparse: int = 8           # BM25 candidates
-    top_k_final: int = 4            # passed to the LLM after fusion
+    top_k_dense: int = 8  # vector search candidates
+    top_k_sparse: int = 8  # BM25 candidates
+    top_k_final: int = 4  # passed to the LLM after fusion
     min_relevance_score: float = 0.2
 
     # --- Agent loop ---
-    max_iterations: int = 3         # cap reflective re-retrieval cycles
+    max_iterations: int = 3  # cap reflective re-retrieval cycles
     enable_query_rewrite: bool = True
     enable_grading: bool = True
 
