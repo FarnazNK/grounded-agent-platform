@@ -3,7 +3,7 @@
 [![ci](https://github.com/FarnazNK/rag-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/FarnazNK/rag-agent/actions)
 [![python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
 [![tests](https://img.shields.io/badge/tests-50%20passing-brightgreen.svg)](#testing)
-[![license](https://img.shields.io/badge/license-MIT-lightgrey.svg)](#license)
+
 
 A production-style RAG agent built on LangGraph with hybrid retrieval, an
 evaluation harness, regex guardrails, a FastAPI service, Prometheus metrics,
