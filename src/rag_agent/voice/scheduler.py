@@ -358,9 +358,7 @@ class DynamicBatchScheduler:
             if req.is_expired(now):
                 self._stats.expired += 1
                 if not req.future.done():
-                    req.future.set_exception(
-                        TimeoutError("request expired before inference")
-                    )
+                    req.future.set_exception(TimeoutError("request expired before inference"))
                 self._queue.task_done()
             else:
                 live.append(req)

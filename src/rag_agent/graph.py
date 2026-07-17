@@ -91,9 +91,7 @@ def _make_rewrite_node():
             f"{m.type}: {m.content}"
             for m in state.messages[-4:]  # last 2 turns
         )
-        rewritten = await invoke_with_retry_async(
-            llm, build_rewrite_prompt(state.query, history)
-        )
+        rewritten = await invoke_with_retry_async(llm, build_rewrite_prompt(state.query, history))
         log.info(
             "node.rewrite",
             run_id=state.run_id,
@@ -129,9 +127,7 @@ def _make_grade_node():
             )
             return {"grading": grading}
 
-        raw = await invoke_with_retry_async(
-            llm, build_grader_prompt(state.query, state.chunks)
-        )
+        raw = await invoke_with_retry_async(llm, build_grader_prompt(state.query, state.chunks))
         try:
             # Strip code fences if the LLM added them.
             cleaned = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```")
@@ -163,9 +159,7 @@ def _make_generate_node():
     llm = build_llm()
 
     async def generate_node(state: AgentState) -> dict:
-        answer = await invoke_with_retry_async(
-            llm, build_answer_prompt(state.query, state.chunks)
-        )
+        answer = await invoke_with_retry_async(llm, build_answer_prompt(state.query, state.chunks))
         return {
             "final_answer": answer,
             "messages": [AIMessage(content=answer)],

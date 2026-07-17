@@ -65,9 +65,7 @@ def client(tmp_path, fake_state):
     with patch("rag_agent.agent.ChromaStore", lambda **kw: _FakeStore()):
         app = create_app(data_dir=tmp_path)
         with TestClient(app) as c:
-            with patch.object(
-                c.app.state.agent, "arun", new=AsyncMock(return_value=fake_state)
-            ):
+            with patch.object(c.app.state.agent, "arun", new=AsyncMock(return_value=fake_state)):
                 yield c
 
 
