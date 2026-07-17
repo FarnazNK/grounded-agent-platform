@@ -3,10 +3,15 @@
 These stub out the LLM with a deterministic fake so the whole graph can run
 in CI without any API keys. We're testing topology and state-threading, not
 the LLM itself.
+
+The graph is fully async, so the fake replaces `invoke_with_retry_async` and
+the graph is driven with `ainvoke`. Each test asserts the same topology
+invariants as before the async conversion.
 """
 
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from unittest.mock import patch
 
@@ -34,10 +39,14 @@ class FakeStore:
 
 
 def _fake_invoke_factory(responses: dict[str, str]):
-    """Build a fake `invoke_with_retry` that returns different strings based
-    on what system prompt it sees. Lets one fake serve every node."""
+    """Build a fake `invoke_with_retry_async` that returns different strings
+    based on what system prompt it sees. Lets one fake serve every node.
 
-    def fake_invoke(llm: Any, messages: list[tuple[str, str]]) -> str:
+    Async because the nodes now await it — patching in a sync function would
+    hand the node a str where it awaits a coroutine.
+    """
+
+    async def fake_invoke(llm: Any, messages: list[tuple[str, str]]) -> str:
         system = next((m[1] for m in messages if m[0] == "system"), "")
         for key, reply in responses.items():
             if key in system:
@@ -82,9 +91,9 @@ def test_retrieval_path_reaches_generate():
         }
     )
 
-    with patch("rag_agent.graph.invoke_with_retry", side_effect=fake_invoke):
+    with patch("rag_agent.graph.invoke_with_retry_async", side_effect=fake_invoke):
         graph = build_graph(retriever)
-        result = graph.invoke(AgentState(query="How many PTO days?"))
+        result = asyncio.run(graph.ainvoke(AgentState(query="How many PTO days?")))
 
     state = AgentState.model_validate(result)
     assert state.route == "retrieve"
@@ -100,9 +109,9 @@ def test_refuse_path_short_circuits():
 
     fake_invoke = _fake_invoke_factory({"router": "refuse"})
 
-    with patch("rag_agent.graph.invoke_with_retry", side_effect=fake_invoke):
+    with patch("rag_agent.graph.invoke_with_retry_async", side_effect=fake_invoke):
         graph = build_graph(retriever)
-        result = graph.invoke(AgentState(query="Do something harmful"))
+        result = asyncio.run(graph.ainvoke(AgentState(query="Do something harmful")))
 
     state = AgentState.model_validate(result)
     assert state.route == "refuse"
@@ -133,9 +142,11 @@ def test_irrelevant_retrieval_triggers_retry_then_gives_up():
         }
     )
 
-    with patch("rag_agent.graph.invoke_with_retry", side_effect=fake_invoke):
+    with patch("rag_agent.graph.invoke_with_retry_async", side_effect=fake_invoke):
         graph = build_graph(retriever)
-        result = graph.invoke(AgentState(query="What's our parental leave policy?"))
+        result = asyncio.run(
+            graph.ainvoke(AgentState(query="What's our parental leave policy?"))
+        )
 
     state = AgentState.model_validate(result)
     # Iterations should hit the cap (default 3) then generate anyway.

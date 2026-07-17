@@ -10,10 +10,14 @@ Design notes:
 - The Agent is built once at startup and reused across requests. Constructing
   it per-request would cost us a Chroma reconnect every time.
 - Guardrails run synchronously in the request path. They're regex-based and
-  fast (<1 ms). Model-based guardrails would need to move to a sidecar.
-- We stream as SSE rather than WebSocket because SSE is simpler, has built-in
-  reconnection, and works through every proxy. The trade-off is one-way
-  communication, which is fine for a Q&A agent.
+  measured at ~0.17 ms for a 440-char query, so offloading them to a thread
+  would cost more in hop overhead than it saves. Model-based guardrails would
+  need to move off the loop (or to a sidecar).
+- Every route is async and every call inside it either awaits or is measured
+  fast enough to run inline. Nothing calls `agent.run()` — see `arun`.
+- SSE (`/stream`) stays for text clients: simple, auto-reconnecting, proxy-
+  friendly, and one-way is fine for Q&A. Voice needs the client to send audio
+  while the server streams back, so it gets a WebSocket endpoint instead.
 """
 
 from __future__ import annotations
@@ -174,8 +178,18 @@ def create_app(data_dir: Path | str | None = None) -> FastAPI:
         _record_sanitizations(in_decisions)
 
         # --- run the agent ---------------------------------------------------
+        # `arun`, not `run`: this is an async handler, so a synchronous graph
+        # call here would block the single event loop thread for the entire
+        # multi-second run and serialize every concurrent request behind it.
         try:
-            state = agent.run(sanitized_query)
+            state = await agent.arun(
+                sanitized_query,
+                timeout=app.state.settings.request_timeout_seconds,
+            )
+        except TimeoutError as exc:
+            log.warning("api.query.timeout", query=sanitized_query[:60])
+            REQUESTS.labels(endpoint=endpoint, status="timeout").inc()
+            raise HTTPException(504, detail="agent run exceeded deadline") from exc
         except Exception as exc:
             log.exception("api.query.failed", error=str(exc))
             REQUESTS.labels(endpoint=endpoint, status="error").inc()

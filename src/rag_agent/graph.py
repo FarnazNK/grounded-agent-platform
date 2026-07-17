@@ -4,6 +4,16 @@ The graph is intentionally explicit — no auto-magic. Each node is a pure-ish
 function from state to state-update, which makes them easy to test in
 isolation and easy to swap.
 
+Every node is `async def`. The nodes that call an LLM await the provider's
+native async client; the retrieve node awaits a thread-offloaded hybrid
+search. Nothing in a node body may block the event loop — under concurrent
+voice sessions a single blocking call stalls every other session sharing the
+worker, which shows up directly as p99 tail latency.
+
+A uniformly async graph also means `ainvoke`/`astream_events` never silently
+fall back to running a sync node in LangGraph's default thread pool, which
+would cap effective concurrency at the pool size.
+
 Topology:
 
     START
@@ -29,7 +39,7 @@ from langchain_core.messages import AIMessage
 from langgraph.graph import END, START, StateGraph
 
 from rag_agent.config import get_settings
-from rag_agent.llm import build_llm, invoke_with_retry
+from rag_agent.llm import build_llm, invoke_with_retry_async
 from rag_agent.observability import get_logger
 from rag_agent.prompts import (
     build_answer_prompt,
@@ -51,9 +61,9 @@ log = get_logger(__name__)
 def _make_route_node():
     llm = build_llm()
 
-    def route_node(state: AgentState) -> dict:
+    async def route_node(state: AgentState) -> dict:
         messages = build_router_prompt(state.query)
-        raw = invoke_with_retry(llm, messages).lower().strip()
+        raw = (await invoke_with_retry_async(llm, messages)).lower().strip()
 
         # Defensive parsing — LLMs occasionally return prose around the word.
         decision: RouteDecision
@@ -73,7 +83,7 @@ def _make_route_node():
 def _make_rewrite_node():
     llm = build_llm()
 
-    def rewrite_node(state: AgentState) -> dict:
+    async def rewrite_node(state: AgentState) -> dict:
         if not get_settings().enable_query_rewrite:
             return {"rewritten_query": state.query}
 
@@ -81,7 +91,9 @@ def _make_rewrite_node():
             f"{m.type}: {m.content}"
             for m in state.messages[-4:]  # last 2 turns
         )
-        rewritten = invoke_with_retry(llm, build_rewrite_prompt(state.query, history))
+        rewritten = await invoke_with_retry_async(
+            llm, build_rewrite_prompt(state.query, history)
+        )
         log.info(
             "node.rewrite",
             run_id=state.run_id,
@@ -94,9 +106,11 @@ def _make_rewrite_node():
 
 
 def _make_retrieve_node(retriever: HybridRetriever):
-    def retrieve_node(state: AgentState) -> dict:
+    async def retrieve_node(state: AgentState) -> dict:
         query = state.rewritten_query or state.query
-        chunks = retriever.retrieve(query)
+        # aretrieve pushes the blocking embeddings call + CPU-bound BM25 scan
+        # onto a worker thread so the event loop stays responsive.
+        chunks = await retriever.aretrieve(query)
         return {"chunks": chunks, "iterations": state.iterations + 1}
 
     return retrieve_node
@@ -105,7 +119,7 @@ def _make_retrieve_node(retriever: HybridRetriever):
 def _make_grade_node():
     llm = build_llm()
 
-    def grade_node(state: AgentState) -> dict:
+    async def grade_node(state: AgentState) -> dict:
         if not get_settings().enable_grading or not state.chunks:
             # Skip grading -> assume relevant, let answer node handle empty case.
             grading = GradingResult(
@@ -115,7 +129,9 @@ def _make_grade_node():
             )
             return {"grading": grading}
 
-        raw = invoke_with_retry(llm, build_grader_prompt(state.query, state.chunks))
+        raw = await invoke_with_retry_async(
+            llm, build_grader_prompt(state.query, state.chunks)
+        )
         try:
             # Strip code fences if the LLM added them.
             cleaned = raw.strip().removeprefix("```json").removeprefix("```").removesuffix("```")
@@ -146,8 +162,10 @@ def _make_grade_node():
 def _make_generate_node():
     llm = build_llm()
 
-    def generate_node(state: AgentState) -> dict:
-        answer = invoke_with_retry(llm, build_answer_prompt(state.query, state.chunks))
+    async def generate_node(state: AgentState) -> dict:
+        answer = await invoke_with_retry_async(
+            llm, build_answer_prompt(state.query, state.chunks)
+        )
         return {
             "final_answer": answer,
             "messages": [AIMessage(content=answer)],
@@ -156,13 +174,13 @@ def _make_generate_node():
     return generate_node
 
 
-def _direct_answer_node(state: AgentState) -> dict:
+async def _direct_answer_node(state: AgentState) -> dict:
     llm = build_llm()
-    answer = invoke_with_retry(llm, [("user", state.query)])
+    answer = await invoke_with_retry_async(llm, [("user", state.query)])
     return {"final_answer": answer, "messages": [AIMessage(content=answer)]}
 
 
-def _refuse_node(state: AgentState) -> dict:
+async def _refuse_node(state: AgentState) -> dict:
     msg = (
         "I can't help with that — it falls outside what this assistant is "
         "designed to do. If you think this was a mistake, rephrase your "

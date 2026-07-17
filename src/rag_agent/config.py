@@ -53,6 +53,34 @@ class Settings(BaseSettings):
     enable_query_rewrite: bool = True
     enable_grading: bool = True
 
+    # --- Serving ---
+    # Wall-clock cap on a single agent run. Generous relative to a normal run
+    # (route + rewrite + retrieve + grade + generate against a hosted LLM),
+    # but bounded: without it a wedged provider call pins a worker slot until
+    # the client gives up, and under load that is how a queue collapses.
+    request_timeout_seconds: float = 60.0
+
+    # --- Voice: STT + inference scheduling ---
+    # `simulated` runs anywhere and transcribes nothing — it exists so the
+    # serving path is testable without a GPU. Switch to a real provider on a
+    # GPU host; nothing above the provider interface changes.
+    stt_provider: Literal["simulated", "faster_whisper"] = "simulated"
+    stt_model: str = "large-v3-turbo"
+    stt_compute_type: Literal["float16", "int8", "float32"] = "float16"
+
+    # The two knobs the benchmark sweeps. Defaults are a starting point, not
+    # a tuned configuration — run benchmarks/load/run_load.py on the target
+    # hardware and set them from the measured curve.
+    #
+    # NOTE: max_batch_size does nothing when stt_max_wait_ms is 0. With no
+    # wait window there is never more than one request available to batch,
+    # so the scheduler runs batches of 1 regardless of the cap. This is
+    # measured in benchmarks/load/results/batch_sweep.md.
+    stt_max_batch_size: int = 8
+    stt_max_wait_ms: float = 10.0
+    stt_queue_capacity: int = 256
+    stt_max_concurrent_batches: int = 1
+
     # --- Observability ---
     # If LANGSMITH_API_KEY is set in the env, traces will flow there. Otherwise
     # tracing degrades to structured logs — no hard dependency.
