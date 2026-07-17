@@ -2,7 +2,7 @@
 
 [![ci](https://github.com/FarnazNK/rag-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/FarnazNK/rag-agent/actions)
 [![python](https://img.shields.io/badge/python-3.11%2B-blue.svg)](https://www.python.org/downloads/)
-[![tests](https://img.shields.io/badge/tests-50%20passing-brightgreen.svg)](#testing)
+[![tests](https://img.shields.io/badge/tests-90%20passing-brightgreen.svg)](#testing)
 
 
 A production-style RAG agent built on LangGraph with hybrid retrieval, an
@@ -21,6 +21,7 @@ deployment, guardrails — not just on getting an LLM to answer a question.
 ## Table of contents
 
 - [What's in the box](#whats-in-the-box)
+- [Serving layer: async, batching, backpressure](#serving-layer-async-batching-backpressure)
 - [Quickstart](#quickstart)
 - [Architecture](#architecture)
 - [Benchmark results](#benchmark-results)
@@ -31,6 +32,112 @@ deployment, guardrails — not just on getting an LLM to answer a question.
 - [Deployment](#deployment)
 - [Project structure](#project-structure)
 - [What I'd build next](#what-id-build-next)
+
+---
+
+## Serving layer: async, batching, backpressure
+
+The agent above answers questions. This layer is about serving it under
+concurrent load, where the interesting problems are queueing and tail latency
+rather than prompt quality.
+
+### Fully async execution path
+
+Every graph node is `async def`; LLM calls await the provider's native async
+client, and the CPU-bound BM25 scan plus the blocking embeddings call are
+offloaded with `asyncio.to_thread`. `/query` awaits `Agent.arun()`.
+
+This was a real bug, not a refactor. The previous `/query` called the
+synchronous `agent.run()` from an async handler, which blocks the event loop
+for the entire multi-second run and serializes every concurrent request behind
+it. Measured through the real HTTP stack with a mocked LLM:
+
+| Concurrency | Serialized (blocking) | Async | Speedup |
+|---:|---:|---:|---:|
+| 8 | ~1600 ms | 248 ms | 6.4x |
+| 32 | ~6400 ms | 344 ms | 18.6x |
+
+`tests/test_async_path.py` locks this in with a concurrency test that fails if
+anyone reintroduces a blocking call, plus a control test proving the probe can
+actually detect a stall.
+
+`arun` takes a deadline and is cancellable — cancelling the task unwinds the
+graph at whatever await is in flight, which is the mechanism barge-in needs.
+
+### Dynamic batch scheduler
+
+`src/rag_agent/voice/scheduler.py` — a bounded queue in front of a batching
+consumer:
+
+- A batch closes when it hits `max_batch_size` **or** `max_wait_ms` elapses
+  since the batch's *first* request. Anchoring the deadline to the first
+  request (not the last) is what prevents a steady arrival stream from
+  postponing the batch forever and starving the oldest caller.
+- The queue is bounded. At capacity, `submit()` raises `QueueFullError`
+  instead of buffering — an unbounded queue converts overload into an OOM,
+  and work whose caller already hung up is pure waste. Shedding load fast is
+  the feature.
+- Requests carry deadlines; expired ones are dropped before inference rather
+  than spending device time on a result nobody will read.
+- One bad batch fails only its own callers; the consumer loop survives.
+
+### Measured results
+
+Full reports in [`benchmarks/load/results/`](benchmarks/load/results/), with
+the harness in [`benchmarks/load/`](benchmarks/load/README.md).
+
+> **These are scheduler numbers, not speech-model numbers.** The default
+> backend is `SimulatedSTT`, which sleeps according to an explicit cost model
+> and transcribes nothing. It exists so the serving path is testable without a
+> GPU. Swap in a faster-whisper provider on a GPU host and re-run the same
+> harness for real figures — the interface, sweep, and metrics don't change.
+
+**`max_wait_ms=0` silently disables batching.** Mean batch size stays at 1.00
+for *every* batch cap from 1 to 16; throughput pins at ~28 rps. The cap alone
+does nothing — batching needs a window to accumulate against. This is exactly
+what the `voice_inference_batch_size` histogram exists to catch in production.
+
+**Above saturation, batching improves latency *and* throughput.** At
+concurrency 32 with a 5 ms window, batch 1 → 16 gave ~7.6x throughput
+(28 → 216 rps) and ~7.6x lower p50 (1132 → 149 ms). The textbook
+latency-for-throughput tradeoff holds at concurrency 1, where a lone request
+pays the full window for nothing — and inverts under load, where queue wait
+dominates and draining faster wins on both axes.
+
+**Clean saturation knee at ~8 concurrent clients** (2 s segments):
+
+| Concurrency | p50 | p95 | p99 | RPS | Queue p95 |
+|---:|---:|---:|---:|---:|---:|
+| 1 | 45.8 ms | 48.9 ms | 50.3 ms | 21.9 | 10.5 ms |
+| 8 | 54.9 ms | 60.8 ms | 62.9 ms | 144.1 | 0.2 ms |
+| 32 | 221.5 ms | 252.2 ms | 257.2 ms | 142.7 | 196.4 ms |
+| 64 | 438.7 ms | 449.5 ms | 455.3 ms | 145.5 | 394.6 ms |
+
+Throughput plateaus at ~145 rps from concurrency 8 while latency grows
+linearly. At 64, queue wait is 395 ms of the 439 ms total — 90% of latency is
+pure queueing. Past the knee the answer is capacity, not tuning.
+
+Percentiles use nearest-rank (not interpolation), so every figure is a real
+observation; p99 below 100 samples is flagged rather than quoted.
+
+### Stage-level metrics
+
+`voice_stage_latency_seconds{stage=stt|agent|tts}`,
+`voice_inference_batch_size`, `voice_inference_queue_wait_seconds`,
+`voice_audio_queue_depth`, `voice_transcription_realtime_factor`,
+`voice_dropped_audio_chunks_total`, and others. Request-level latency can't
+answer the only question that matters during a p99 regression — *which
+stage?* — so the histograms are labelled by stage and bucketed for the
+100 ms–2 s range voice SLOs actually live in.
+
+### What is not built
+
+Streaming STT/TTS with real models, WebSocket audio sessions, barge-in, GPU
+profiling, and rollout controls are **not implemented**. They need a GPU and
+real model weights; writing that code without being able to run it would mean
+publishing latency claims I haven't measured. The provider interface
+(`SpeechToTextProvider` / `TextToSpeechProvider`) and the cancellation
+plumbing are in place so those land without touching orchestration.
 
 ---
 
