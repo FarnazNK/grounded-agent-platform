@@ -1,0 +1,151 @@
+{
+  "simulated": true,
+  "provider": "SimulatedSTT",
+  "host": "Linux-6.18.5-x86_64-with-glibc2.39",
+  "scenarios": [
+    {
+      "concurrency": 1,
+      "max_batch_size": 8,
+      "max_wait_ms": 10.0,
+      "requests": 400,
+      "completed": 400,
+      "rejected": 0,
+      "failed": 0,
+      "wall_seconds": 18.295,
+      "throughput_rps": 21.86,
+      "audio_seconds_per_second": 43.73,
+      "error_rate": 0.0,
+      "mean_batch_size": 1.0,
+      "latency": {
+        "count": 400,
+        "mean_ms": 45.73662771750264,
+        "p50_ms": 45.797565000043505,
+        "p90_ms": 48.19189500005905,
+        "p95_ms": 48.93286599997282,
+        "p99_ms": 50.27993599992442,
+        "min_ms": 39.74316800008637,
+        "max_ms": 77.43784100000539,
+        "p99_reliable": true
+      },
+      "queue_wait": {
+        "count": 400,
+        "mean_ms": 10.40133565750267,
+        "p50_ms": 10.31262300000435,
+        "p90_ms": 10.411849999968581,
+        "p95_ms": 10.4715390000365,
+        "p99_ms": 10.544181999989632,
+        "min_ms": 10.19539399999303,
+        "max_ms": 39.883730000042306,
+        "p99_reliable": true
+      }
+    },
+    {
+      "concurrency": 8,
+      "max_batch_size": 8,
+      "max_wait_ms": 10.0,
+      "requests": 400,
+      "completed": 400,
+      "rejected": 0,
+      "failed": 0,
+      "wall_seconds": 2.776,
+      "throughput_rps": 144.07,
+      "audio_seconds_per_second": 288.15,
+      "error_rate": 0.0,
+      "mean_batch_size": 8.0,
+      "latency": {
+        "count": 400,
+        "mean_ms": 55.52230508749715,
+        "p50_ms": 54.88980999996329,
+        "p90_ms": 58.858011999973314,
+        "p95_ms": 60.846171999969556,
+        "p99_ms": 62.858919000063906,
+        "min_ms": 49.89509999995789,
+        "max_ms": 62.87000899999384,
+        "p99_reliable": true
+      },
+      "queue_wait": {
+        "count": 400,
+        "mean_ms": 0.15726794750435147,
+        "p50_ms": 0.150867999991533,
+        "p90_ms": 0.2022330000954753,
+        "p95_ms": 0.22233400000004622,
+        "p99_ms": 0.2561890000833955,
+        "min_ms": 0.0991370000065217,
+        "max_ms": 0.28735700004745013,
+        "p99_reliable": true
+      }
+    },
+    {
+      "concurrency": 32,
+      "max_batch_size": 8,
+      "max_wait_ms": 10.0,
+      "requests": 384,
+      "completed": 384,
+      "rejected": 0,
+      "failed": 0,
+      "wall_seconds": 2.691,
+      "throughput_rps": 142.7,
+      "audio_seconds_per_second": 285.4,
+      "error_rate": 0.0,
+      "mean_batch_size": 8.0,
+      "latency": {
+        "count": 384,
+        "mean_ms": 216.83537104166578,
+        "p50_ms": 221.53898500005198,
+        "p90_ms": 235.2926099999877,
+        "p95_ms": 252.22113700010595,
+        "p99_ms": 257.155437999927,
+        "min_ms": 53.86663600006614,
+        "max_ms": 257.1785229999932,
+        "p99_reliable": true
+      },
+      "queue_wait": {
+        "count": 384,
+        "mean_ms": 160.95669815625456,
+        "p50_ms": 166.11137899997175,
+        "p90_ms": 176.56451499999548,
+        "p95_ms": 196.41716399996767,
+        "p99_ms": 198.44208999995772,
+        "min_ms": 0.24735500005590438,
+        "max_ms": 198.48744700004772,
+        "p99_reliable": true
+      }
+    },
+    {
+      "concurrency": 64,
+      "max_batch_size": 8,
+      "max_wait_ms": 10.0,
+      "requests": 384,
+      "completed": 384,
+      "rejected": 0,
+      "failed": 0,
+      "wall_seconds": 2.64,
+      "throughput_rps": 145.47,
+      "audio_seconds_per_second": 290.94,
+      "error_rate": 0.0,
+      "mean_batch_size": 8.0,
+      "latency": {
+        "count": 384,
+        "mean_ms": 407.914178361976,
+        "p50_ms": 438.7411320000183,
+        "p90_ms": 446.7284810000365,
+        "p95_ms": 449.47162599999047,
+        "p99_ms": 455.2992289999338,
+        "min_ms": 54.146928000022854,
+        "max_ms": 455.3558069999326,
+        "p99_reliable": true
+      },
+      "queue_wait": {
+        "count": 384,
+        "mean_ms": 353.1043962109347,
+        "p50_ms": 383.0594270000347,
+        "p90_ms": 393.00858000001426,
+        "p95_ms": 394.64125400002104,
+        "p99_ms": 398.6601110000265,
+        "min_ms": 0.4861810000420519,
+        "max_ms": 398.7029809999285,
+        "p99_reliable": true
+      }
+    }
+  ]
+}
