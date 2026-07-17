@@ -8,6 +8,7 @@ breaking callers.
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -91,7 +92,12 @@ class Agent:
         return result.final_answer or ""
 
     def run(self, query: str, *, history: list[Any] | None = None) -> AgentState:
-        """Full run, returning the final state for inspection / eval hooks."""
+        """Full run, returning the final state for inspection / eval hooks.
+
+        Synchronous. Safe from the CLI, scripts, and evals — but never call
+        this from an async request handler: it blocks the event loop for the
+        whole multi-second agent run. Use `arun` there.
+        """
         initial = AgentState(
             query=query,
             messages=[*(history or []), HumanMessage(content=query)],
@@ -99,6 +105,50 @@ class Agent:
         # LangGraph returns a dict; revalidate as AgentState for type safety.
         final_dict = self._graph.invoke(initial)
         return AgentState.model_validate(final_dict)
+
+    async def arun(
+        self,
+        query: str,
+        *,
+        history: list[Any] | None = None,
+        timeout: float | None = None,
+    ) -> AgentState:
+        """Async full run. This is the entrypoint for the serving path.
+
+        `timeout` bounds the whole graph execution. It exists because a voice
+        session has a deadline that a text request doesn't: an answer that
+        arrives after the caller has already given up is pure cost. On expiry
+        the underlying graph task is cancelled and `asyncio.TimeoutError`
+        propagates.
+
+        Cancellation: `asyncio.wait_for` cancels the inner task, and because
+        every node is a coroutine, the CancelledError lands at whichever await
+        is currently in flight and unwinds the graph. That is what makes
+        barge-in possible — the caller just cancels the task holding this
+        coroutine and in-flight LLM work stops rather than running to
+        completion against a client that stopped listening.
+        """
+        initial = AgentState(
+            query=query,
+            messages=[*(history or []), HumanMessage(content=query)],
+        )
+        coro = self._graph.ainvoke(initial)
+        if timeout is not None:
+            final_dict = await asyncio.wait_for(coro, timeout=timeout)
+        else:
+            final_dict = await coro
+        return AgentState.model_validate(final_dict)
+
+    async def aask(
+        self,
+        query: str,
+        *,
+        history: list[Any] | None = None,
+        timeout: float | None = None,
+    ) -> str:
+        """Async one-shot question. Returns the final answer string."""
+        result = await self.arun(query, history=history, timeout=timeout)
+        return result.final_answer or ""
 
     async def astream_events(self, query: str, *, history: list[Any] | None = None):
         """Async event stream for SSE / WebSocket clients.

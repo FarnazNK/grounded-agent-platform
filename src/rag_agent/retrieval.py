@@ -7,6 +7,7 @@ reciprocal rank fusion (RRF) — cheap, robust, no extra model needed.
 
 from __future__ import annotations
 
+import asyncio
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -59,6 +60,25 @@ class HybridRetriever:
             returned=len(top),
         )
         return top
+
+    async def aretrieve(self, query: str) -> list[RetrievedChunk]:
+        """Async retrieve for the serving path.
+
+        Both halves of this are blocking in a way that matters under
+        concurrency:
+
+        - `store.similarity_search` makes a synchronous embeddings HTTP call
+          and a Chroma query.
+        - `BM25Okapi.get_scores` is pure-Python CPU work, O(corpus) per query.
+
+        Neither has a native async API, so we hand the whole fused retrieve to
+        a worker thread. The GIL still serializes the BM25 arithmetic, but the
+        event loop stays free to accept connections and pump other sessions —
+        which is the property we actually need. If BM25 ever becomes the
+        bottleneck, the fix is a process pool or a real search backend
+        (OpenSearch), not a different await.
+        """
+        return await asyncio.to_thread(self.retrieve, query)
 
     def _bm25_search(self, query: str, k: int) -> list[RetrievedChunk]:
         if not self._bm25:

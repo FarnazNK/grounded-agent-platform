@@ -1,6 +1,6 @@
 """API tests with TestClient. The agent is mocked so no API keys are needed.
 
-We patch `Agent.run` rather than going through the full graph because the
+We patch `Agent.arun` rather than going through the full graph because the
 graph wiring is already covered in test_graph.py. Here we want to exercise
 the HTTP-layer concerns: status codes, schema shapes, guardrails wiring,
 metrics, error paths.
@@ -8,7 +8,7 @@ metrics, error paths.
 
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -42,7 +42,11 @@ def fake_state() -> AgentState:
 @pytest.fixture
 def client(tmp_path, fake_state):
     """Build the API with a minimal corpus so startup succeeds, then patch
-    Agent.run to return the canned state."""
+    Agent.arun to return the canned state.
+
+    AsyncMock, not Mock: the route awaits `arun`, so a plain Mock would hand
+    the handler a non-awaitable and fail inside the try/except as a 500.
+    """
     # Minimal one-file corpus so _load_corpus() returns at least one doc.
     (tmp_path / "pto_policy.md").write_text("New hires get 15 PTO days per year.")
 
@@ -61,7 +65,9 @@ def client(tmp_path, fake_state):
     with patch("rag_agent.agent.ChromaStore", lambda **kw: _FakeStore()):
         app = create_app(data_dir=tmp_path)
         with TestClient(app) as c:
-            with patch.object(c.app.state.agent, "run", return_value=fake_state):
+            with patch.object(
+                c.app.state.agent, "arun", new=AsyncMock(return_value=fake_state)
+            ):
                 yield c
 
 
