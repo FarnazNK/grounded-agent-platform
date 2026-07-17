@@ -144,9 +144,7 @@ def test_irrelevant_retrieval_triggers_retry_then_gives_up():
 
     with patch("rag_agent.graph.invoke_with_retry_async", side_effect=fake_invoke):
         graph = build_graph(retriever)
-        result = asyncio.run(
-            graph.ainvoke(AgentState(query="What's our parental leave policy?"))
-        )
+        result = asyncio.run(graph.ainvoke(AgentState(query="What's our parental leave policy?")))
 
     state = AgentState.model_validate(result)
     # Iterations should hit the cap (default 3) then generate anyway.

@@ -233,7 +233,7 @@ def render_markdown(
             f"{r.completed} | {r.latency.p50_ms:.1f} | {r.latency.p95_ms:.1f} | "
             f"{p99} | {r.mean_batch_size:.2f} | {r.queue_wait.p95_ms:.1f} | "
             f"{r.throughput_rps:.1f} | {r.audio_seconds_per_second:.1f} | "
-            f"{r.error_rate*100:.2f}% |"
+            f"{r.error_rate * 100:.2f}% |"
         )
     lines.append("")
     if any(not r.latency.p99_reliable for r in results):
@@ -320,7 +320,7 @@ async def main() -> None:
             print(
                 f"  concurrency={c:3d} -> p50={r.latency.p50_ms:6.1f}ms "
                 f"p95={r.latency.p95_ms:6.1f}ms p99={r.latency.p99_ms:7.1f}ms "
-                f"rps={r.throughput_rps:6.1f} errors={r.error_rate*100:.1f}%"
+                f"rps={r.throughput_rps:6.1f} errors={r.error_rate * 100:.1f}%"
             )
 
     out = Path(args.out)

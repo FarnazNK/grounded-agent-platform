@@ -74,7 +74,7 @@ async def test_single_request_does_not_wait_for_full_batch():
     assert result.text == "id=0"
     assert sizes == [1]
     # 20ms window + 10ms infer + overhead. Must not be a multiple of the window.
-    assert elapsed < 0.15, f"single request took {elapsed*1000:.0f}ms"
+    assert elapsed < 0.15, f"single request took {elapsed * 1000:.0f}ms"
 
 
 @pytest.mark.asyncio
