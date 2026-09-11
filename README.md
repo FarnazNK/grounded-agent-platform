@@ -37,25 +37,26 @@ Many AI demos stop at “the model answered a question.” This project goes fur
 
 ```mermaid
 flowchart LR
-    Client[Client / user app] -->|HTTP| API[FastAPI service\n/query, /stream, /health]
-    API --> Guard[Input guardrails\nPII + prompt injection]
-    Guard --> Router[Router / classifier]
+    Client[Client / API consumer] -->|HTTPS| API[FastAPI API\n/query, /stream, /health]
 
-    Router --> Direct[Direct answer path]
-    Router --> Rewrite[Query rewrite]
-    Rewrite --> Retriever[Hybrid retrieval\nDense + BM25 + RRF]
-    Retriever --> Grade[Context grading]
+    API --> Guard[Guardrails\nPII + prompt injection]
+    API --> Orchestrator[Agent orchestrator\nrewrite + retrieve + grade]
+    API --> Metrics[Metrics + health\nPrometheus]
+    API --> Eval[Eval harness\nbenchmark + scoring]
 
-    Grade -->|relevant| Generate[LLM generation]
-    Grade -->|insufficient| Rewrite
-    Generate --> Output[Output guardrails\nsource validation + sanitization]
-    Output --> Response[Final answer + citations + metadata]
+    Orchestrator --> LLM[(LLM provider\nAnthropic / OpenAI)]
+    Orchestrator --> Vector[(Chroma vector store\nembeddings + metadata)]
+    Orchestrator --> Corpus[(Knowledge corpus\nHR / IT / security docs)]
 
-    Corpus[(Knowledge corpus)] --> Retriever
-    LLM[(LLM provider)] --> Generate
-    API --> Metrics[Prometheus metrics\nlatency + counters + health]
-    API --> Eval[Benchmark + eval harness]
-    Config[Config + policies] --> API
+    Redis[(Redis\ncache/jobs)] -. planned .-> API
+    PG[(pgvector\nembeddings)] -. planned .-> Orchestrator
+    Object[(Object storage\nPDFs + docs)] -. planned .-> Corpus
+
+    classDef current fill:#d9f0d7,stroke:#4a8c5a,color:#1f2d1f,stroke-width:1.2px;
+    classDef planned fill:#f7e8c2,stroke:#d4a441,color:#5a4b2d,stroke-width:1.2px,stroke-dasharray: 5 5;
+
+    class Client,API,Guard,Orchestrator,Metrics,Eval,LLM,Vector,Corpus current;
+    class Redis,PG,Object planned;
 ```
 
 ### Architecture principles
