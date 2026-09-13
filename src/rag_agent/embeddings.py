@@ -2,11 +2,9 @@ from __future__ import annotations
 
 import hashlib
 import re
+import time
 from dataclasses import dataclass
 from typing import Protocol
-
-from langchain_openai import OpenAIEmbeddings
-from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from rag_agent.cache import TTLCache
 from rag_agent.config import Settings, get_settings
@@ -32,8 +30,8 @@ class DeterministicEmbeddingProvider:
             return vector
         for token in tokens:
             digest = hashlib.sha256(token.encode("utf-8")).digest()
-            index = digest[0] % self.dimensions
-            sign = 1.0 if digest[1] % 2 == 0 else -1.0
+            index = int.from_bytes(digest[:4], "big") % self.dimensions
+            sign = 1.0 if digest[4] % 2 == 0 else -1.0
             vector[index] += sign
         magnitude = sum(value * value for value in vector) ** 0.5 or 1.0
         return [value / magnitude for value in vector]
@@ -45,52 +43,61 @@ class DeterministicEmbeddingProvider:
         return self._embed(text)
 
 
+def _retry_provider_call(call, *, attempts: int = 3):
+    delay = 0.25
+    for attempt in range(1, attempts + 1):
+        try:
+            return call()
+        except (ProviderTimeoutError, ProviderRateLimitError, ConnectionError):
+            if attempt >= attempts:
+                raise
+            time.sleep(delay)
+            delay = min(delay * 2, 2.0)
+    raise RuntimeError("unreachable")
+
+
 class OpenAIEmbeddingProvider:
     def __init__(self, settings: Settings) -> None:
         self.model_name = settings.embedding_model
-        self._client = OpenAIEmbeddings(model=settings.embedding_model)
+        try:
+            from langchain_openai import OpenAIEmbeddings
+        except ImportError as exc:
+            raise RuntimeError(
+                "OpenAI embedding dependency is not installed. Install project provider "
+                "dependencies before enabling the OpenAI embedding provider."
+            ) from exc
+        self._client = OpenAIEmbeddings(
+            model=settings.embedding_model,
+            dimensions=settings.embedding_dimensions,
+            request_timeout=settings.embedding_request_timeout_seconds,
+        )
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=8),
-        retry=retry_if_exception_type(
-            (TimeoutError, ConnectionError, EmbeddingProviderError, ProviderRateLimitError)
-        ),
-        reraise=True,
-    )
+    @staticmethod
+    def _translate_provider_error(exc: Exception) -> Exception:
+        message = str(exc).lower()
+        if isinstance(exc, TimeoutError) or "timeout" in message or "timed out" in message:
+            return ProviderTimeoutError("Embedding request timed out.")
+        if "rate limit" in message or "429" in message:
+            return ProviderRateLimitError("Embedding provider rate limited the request.")
+        return EmbeddingProviderError(str(exc))
+
     def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        try:
-            return self._client.embed_documents(texts)
-        except TimeoutError as exc:
-            raise ProviderTimeoutError("Embedding request timed out.") from exc
-        except Exception as exc:
-            message = str(exc).lower()
-            if "rate limit" in message or "429" in message:
-                raise ProviderRateLimitError(
-                    "Embedding provider rate limited the request."
-                ) from exc
-            raise EmbeddingProviderError(str(exc)) from exc
+        def call() -> list[list[float]]:
+            try:
+                return self._client.embed_documents(texts)
+            except Exception as exc:
+                raise self._translate_provider_error(exc) from exc
 
-    @retry(
-        stop=stop_after_attempt(3),
-        wait=wait_exponential(multiplier=1, min=1, max=8),
-        retry=retry_if_exception_type(
-            (TimeoutError, ConnectionError, EmbeddingProviderError, ProviderRateLimitError)
-        ),
-        reraise=True,
-    )
+        return _retry_provider_call(call)
+
     def embed_query(self, text: str) -> list[float]:
-        try:
-            return self._client.embed_query(text)
-        except TimeoutError as exc:
-            raise ProviderTimeoutError("Embedding request timed out.") from exc
-        except Exception as exc:
-            message = str(exc).lower()
-            if "rate limit" in message or "429" in message:
-                raise ProviderRateLimitError(
-                    "Embedding provider rate limited the request."
-                ) from exc
-            raise EmbeddingProviderError(str(exc)) from exc
+        def call() -> list[float]:
+            try:
+                return self._client.embed_query(text)
+            except Exception as exc:
+                raise self._translate_provider_error(exc) from exc
+
+        return _retry_provider_call(call)
 
 
 class EmbeddingService:
@@ -125,20 +132,29 @@ class EmbeddingService:
                 vectors[idx] = cached
         if missing_texts:
             fresh = self._provider.embed_documents(missing_texts)
+            if len(fresh) != len(missing_texts):
+                raise EmbeddingProviderError("Embedding provider returned the wrong vector count.")
             for idx, vector, text in zip(missing_indices, fresh, missing_texts, strict=True):
                 vectors[idx] = vector
                 if self._cache:
                     digest = hashlib.sha256(text.encode()).hexdigest()
                     key = f"{self._provider.model_name}:doc:{digest}"
                     self._cache.set(key, vector)
-        return [vector or [] for vector in vectors]
+        if any(vector is None for vector in vectors):
+            raise EmbeddingProviderError("Embedding provider did not return all requested vectors.")
+        return [vector for vector in vectors if vector is not None]
 
 
 def build_embedding_service(settings: Settings | None = None) -> EmbeddingService:
     settings = settings or get_settings()
     cache = TTLCache[str, list[float]](settings.embedding_cache_ttl_seconds)
     if settings.embedding_provider == "deterministic":
-        return EmbeddingService(
-            DeterministicEmbeddingProvider(settings.embedding_dimensions), cache=cache
+        provider: EmbeddingProvider = DeterministicEmbeddingProvider(
+            dimensions=settings.embedding_dimensions,
+            model_name=settings.embedding_model,
         )
-    return EmbeddingService(OpenAIEmbeddingProvider(settings), cache=cache)
+    elif settings.embedding_provider == "openai":
+        provider = OpenAIEmbeddingProvider(settings)
+    else:
+        raise ValueError(f"Unsupported embedding provider: {settings.embedding_provider}")
+    return EmbeddingService(provider, cache)

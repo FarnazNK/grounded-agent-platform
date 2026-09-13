@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -17,11 +18,13 @@ from rag_agent.errors import (
     DuplicateIngestionError,
     IngestionNotFoundError,
     MalformedLLMOutputError,
+    RateLimitExceededError,
     RequestValidationError,
     TokenLimitExceededError,
     WorkspaceNotFoundError,
 )
 from rag_agent.guardrails import (
+    DataExfiltrationDetector,
     PIIDetector,
     PIILeakDetector,
     PromptInjectionDetector,
@@ -61,15 +64,17 @@ class SlidingWindowRateLimiter:
     def __init__(self, limit_per_minute: int) -> None:
         self._limit = limit_per_minute
         self._events: dict[str, list[float]] = {}
+        self._lock = threading.Lock()
 
     def check(self, key: str) -> None:
         now = time.time()
         cutoff = now - 60
-        events = [event for event in self._events.get(key, []) if event >= cutoff]
-        if len(events) >= self._limit:
-            raise AuthorizationFailedError("Rate limit exceeded for this principal.")
-        events.append(now)
-        self._events[key] = events
+        with self._lock:
+            events = [event for event in self._events.get(key, []) if event >= cutoff]
+            if len(events) >= self._limit:
+                raise RateLimitExceededError()
+            events.append(now)
+            self._events[key] = events
 
 
 class RAGService:
@@ -107,8 +112,13 @@ class RAGService:
         workspace_slug: str,
         workspace_name: str,
     ) -> WorkspaceMembership:
-        if not self.settings.enable_bootstrap_admin and self.store.user_count() > 0:
+        if not self.settings.enable_bootstrap_admin:
             raise AuthorizationFailedError("Bootstrap is disabled.")
+        if self.store.user_count() > 0:
+            raise AuthorizationFailedError(
+                "Bootstrap is only allowed before the first user exists."
+            )
+        email = email.strip().casefold()
         if self.store.get_user_by_email(email):
             raise RequestValidationError("User already exists.")
         user = self.store.create_user(email, hash_password(password))
@@ -118,15 +128,15 @@ class RAGService:
         return WorkspaceMembership(workspace=workspace, organization=org, role=MembershipRole.admin)
 
     def authenticate(self, email: str, password: str) -> AuthResult:
-        user = self.store.get_user_by_email(email)
-        if not user or not verify_password(password, user.password_hash):
+        user = self.store.get_user_by_email(email.strip().casefold())
+        if not user or not user.is_active or not verify_password(password, user.password_hash):
             raise AuthenticationRequiredError("Invalid email or password.")
-        return AuthResult(access_token=create_access_token(user.id), user=user)
+        return AuthResult(access_token=create_access_token(user.id, self.settings), user=user)
 
     def get_user(self, user_id: str) -> UserRecord:
         user = self.store.get_user(user_id)
-        if not user:
-            raise AuthenticationRequiredError("Authenticated user no longer exists.")
+        if not user or not user.is_active:
+            raise AuthenticationRequiredError("Authenticated user is unavailable.")
         return user
 
     def list_workspaces(self, user_id: str) -> list[WorkspaceMembership]:
@@ -327,7 +337,10 @@ class RAGService:
         if len(query.split()) * 4 > self.settings.llm_max_prompt_tokens:
             raise TokenLimitExceededError()
         try:
-            sanitized_query, _ = apply_guardrails(query, [PIIDetector(), PromptInjectionDetector()])
+            sanitized_query, _ = apply_guardrails(
+                query,
+                [PIIDetector(), PromptInjectionDetector(), DataExfiltrationDetector()],
+            )
         except GuardrailViolation as exc:
             if exc.decision.action == GuardrailAction.BLOCK:
                 return QueryResult(
@@ -350,6 +363,13 @@ class RAGService:
         chunks, retrieval_metrics = self.retriever.retrieve(
             workspace_id, sanitized_query, query_embedding
         )
+        safe_chunks = []
+        injection_detector = PromptInjectionDetector()
+        for chunk in chunks:
+            decision = injection_detector(chunk.content)
+            if decision.action != GuardrailAction.BLOCK:
+                safe_chunks.append(chunk)
+        chunks = safe_chunks
         llm_result = self.llm.answer_question(sanitized_query, chunks)
         output_text, _ = apply_guardrails(
             llm_result.text,
@@ -377,7 +397,13 @@ class RAGService:
                 db_ms=retrieval_metrics["db_ms"],
             ),
             cached=False,
-            grounded=set(citations).issubset({chunk.source_name for chunk in chunks}),
+            grounded=(
+                (not chunks and not citations)
+                or (
+                    bool(citations)
+                    and set(citations).issubset({chunk.source_name for chunk in chunks})
+                )
+            ),
             sanitized_query=sanitized_query if sanitized_query != query else None,
             refusal=False,
         )

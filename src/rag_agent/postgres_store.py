@@ -46,7 +46,11 @@ class PostgresRAGStore:
             raise DatabaseUnavailableError() from exc
 
     def ping(self) -> None:
-        self._run(lambda: self._session().execute(text("SELECT 1")))
+        def inner() -> None:
+            with self._session() as session:
+                session.execute(text("SELECT 1"))
+
+        self._run(inner)
 
     def user_count(self) -> int:
         def inner():

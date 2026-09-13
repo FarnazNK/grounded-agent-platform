@@ -56,9 +56,19 @@ jobs:
       - name: Integration tests
         run: pytest -q -m integration
       - name: Evaluation gates
-        run: python scripts/run_evals.py --dataset data/eval_datasets/quality.yaml --out benchmarks/results/eval_report.json
+        run: |
+          python scripts/run_evals.py --dataset data/eval_datasets/quality.yaml --out benchmarks/results/eval_report.json
+          python scripts/run_evals.py --dataset data/eval_datasets/adversarial.yaml --out benchmarks/results/adversarial_eval_report.json
       - name: Benchmark regression gate
         run: python benchmarks/load/run_benchmark.py --assert-p95-ms 500 --out benchmarks/load/results/ci-benchmark.json
+      - name: Upload evaluation and benchmark reports
+        uses: actions/upload-artifact@v4
+        with:
+          name: rag-quality-reports
+          path: |
+            benchmarks/results/*.json
+            benchmarks/load/results/*.json
+          if-no-files-found: error
       - name: Dependency scan
         run: pip-audit
       - name: Docker build

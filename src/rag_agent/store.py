@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+from collections import Counter
 from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Protocol
@@ -211,18 +212,41 @@ class InMemoryRAGStore:
     def lexical_search(
         self, workspace_id: str, query: str, limit: int
     ) -> tuple[list[RetrievedChunk], float]:
-        query_terms = set(_terms(query))
-        scored: list[tuple[float, ChunkRecord, DocumentRecord]] = []
+        query_terms = _terms(query)
+        if not query_terms:
+            return [], 0.0
+
+        corpus: list[tuple[ChunkRecord, DocumentRecord, list[str]]] = []
         for chunk in self.chunks.values():
             if chunk.workspace_id != workspace_id:
                 continue
             doc = self.documents.get(chunk.document_id)
             if not doc or doc.status != DocumentStatus.ready:
                 continue
-            doc_terms = set(_terms(chunk.content))
-            overlap = len(query_terms & doc_terms)
-            if overlap:
-                score = overlap / max(1, len(query_terms))
+            corpus.append((chunk, doc, _terms(chunk.content)))
+        if not corpus:
+            return [], 0.0
+
+        document_frequency = {
+            term: sum(1 for _, _, terms in corpus if term in set(terms))
+            for term in set(query_terms)
+        }
+        average_length = sum(len(terms) for _, _, terms in corpus) / len(corpus)
+        k1 = 1.2
+        b = 0.75
+        scored: list[tuple[float, ChunkRecord, DocumentRecord]] = []
+        for chunk, doc, terms in corpus:
+            counts = Counter(terms)
+            score = 0.0
+            for term in query_terms:
+                tf = counts[term]
+                if not tf:
+                    continue
+                df = document_frequency[term]
+                idf = math.log(1.0 + (len(corpus) - df + 0.5) / (df + 0.5))
+                norm = tf + k1 * (1.0 - b + b * len(terms) / max(1.0, average_length))
+                score += idf * (tf * (k1 + 1.0) / norm)
+            if score > 0:
                 scored.append((score, chunk, doc))
         scored.sort(key=lambda item: item[0], reverse=True)
         return [
@@ -279,5 +303,16 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     return max(0.0, dot / (norm_a * norm_b))
 
 
+_STOP_WORDS = {
+    "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "how", "i",
+    "in", "is", "it", "of", "on", "or", "our", "the", "this", "to", "what", "when",
+    "where", "which", "who", "why", "with", "you", "your",
+}
+
+
 def _terms(text: str) -> list[str]:
-    return re.findall(r"[a-z0-9]+", text.lower())
+    return [
+        term
+        for term in re.findall(r"[a-z0-9]+", text.lower())
+        if term not in _STOP_WORDS and len(term) > 1
+    ]

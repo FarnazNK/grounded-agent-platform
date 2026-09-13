@@ -14,7 +14,7 @@ def test_upload_query_and_list_documents(client, seeded_app):
     upload = client.post(
         "/v1/documents/upload",
         params={"workspace_id": seeded_app.alice_workspace_id},
-        headers=auth_header(seeded_app.alice_id),
+        headers=auth_header(seeded_app.alice_id, seeded_app.service.settings),
         files={
             "file": (
                 "new_doc.md",
@@ -31,14 +31,17 @@ def test_upload_query_and_list_documents(client, seeded_app):
     listing = client.get(
         "/v1/documents",
         params={"workspace_id": seeded_app.alice_workspace_id},
-        headers=auth_header(seeded_app.alice_id),
+        headers=auth_header(seeded_app.alice_id, seeded_app.service.settings),
     )
     assert listing.status_code == 200
     assert any(doc["source_name"] == "new_doc.md" for doc in listing.json()["documents"])
 
     query = client.post(
         "/v1/query",
-        headers={**auth_header(seeded_app.alice_id), "x-request-id": "req-123"},
+        headers={
+            **auth_header(seeded_app.alice_id, seeded_app.service.settings),
+            "x-request-id": "req-123",
+        },
         json={
             "workspace_id": seeded_app.alice_workspace_id,
             "query": "What is the expense policy?",
@@ -55,7 +58,7 @@ def test_cross_tenant_access_is_forbidden(client, seeded_app):
     response = client.get(
         "/v1/documents",
         params={"workspace_id": seeded_app.alice_workspace_id},
-        headers=auth_header(seeded_app.bob_id),
+        headers=auth_header(seeded_app.bob_id, seeded_app.service.settings),
     )
     assert response.status_code == 403
 
@@ -64,7 +67,7 @@ def test_duplicate_ingestion_returns_conflict(client, seeded_app):
     response = client.post(
         "/v1/documents/upload",
         params={"workspace_id": seeded_app.alice_workspace_id},
-        headers=auth_header(seeded_app.alice_id),
+        headers=auth_header(seeded_app.alice_id, seeded_app.service.settings),
         files={
             "file": (
                 "dup.md",
@@ -81,8 +84,34 @@ def test_invalid_upload_is_rejected(client, seeded_app):
     response = client.post(
         "/v1/documents/upload",
         params={"workspace_id": seeded_app.alice_workspace_id},
-        headers=auth_header(seeded_app.alice_id),
+        headers=auth_header(seeded_app.alice_id, seeded_app.service.settings),
         files={"file": ("payload.exe", BytesIO(b"MZ"), "application/octet-stream")},
+    )
+    assert response.status_code == 400
+    assert response.json()["error"] == "invalid_upload"
+
+
+def test_document_api_does_not_expose_raw_content(client, seeded_app):
+    response = client.get(
+        "/v1/documents",
+        params={"workspace_id": seeded_app.alice_workspace_id},
+        headers=auth_header(seeded_app.alice_id, seeded_app.service.settings),
+    )
+    assert response.status_code == 200
+    assert response.json()["documents"]
+    assert all("content_text" not in doc for doc in response.json()["documents"])
+
+
+def test_oversized_upload_is_rejected_before_ingestion(client, seeded_app):
+    seeded_app.service.settings = seeded_app.service.settings.model_copy(
+        update={"upload_max_bytes": 1024}
+    )
+    client.app.state.settings = seeded_app.service.settings
+    response = client.post(
+        "/v1/documents/upload",
+        params={"workspace_id": seeded_app.alice_workspace_id},
+        headers=auth_header(seeded_app.alice_id, seeded_app.service.settings),
+        files={"file": ("big.txt", BytesIO(b"x" * 1025), "text/plain")},
     )
     assert response.status_code == 400
     assert response.json()["error"] == "invalid_upload"

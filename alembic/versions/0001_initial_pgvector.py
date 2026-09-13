@@ -79,7 +79,7 @@ def upgrade() -> None:
         sa.Column('chunk_index', sa.Integer(), nullable=False),
         sa.Column('content', sa.Text(), nullable=False),
         sa.Column('token_count', sa.Integer(), nullable=False),
-        sa.Column('embedding', Vector(dim=16), nullable=False),
+        sa.Column('embedding', Vector(dim=256), nullable=False),
         sa.Column('embedding_model', sa.String(length=128), nullable=False),
         sa.Column('chunk_metadata', postgresql.JSONB(astext_type=sa.Text()), nullable=False),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
@@ -87,8 +87,8 @@ def upgrade() -> None:
     )
     op.create_index('ix_document_chunks_workspace_document', 'document_chunks', ['workspace_id', 'document_id'])
     op.execute(
-        'CREATE INDEX ix_document_chunks_embedding ON document_chunks USING ivfflat '
-        '(embedding vector_cosine_ops) WITH (lists = 100)'
+        'CREATE INDEX ix_document_chunks_embedding ON document_chunks USING hnsw '
+        '(embedding vector_cosine_ops) WITH (m = 16, ef_construction = 64)'
     )
     op.execute(
         "CREATE INDEX ix_document_chunks_fts ON document_chunks USING gin "

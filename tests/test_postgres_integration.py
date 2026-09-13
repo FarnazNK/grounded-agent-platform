@@ -7,7 +7,6 @@ from sqlalchemy import text
 
 from rag_agent.config import Settings
 from rag_agent.db import get_session_factory, init_engine
-from rag_agent.postgres_store import PostgresRAGStore
 from rag_agent.service import RAGService
 
 
@@ -16,6 +15,8 @@ def test_postgres_ingestion_and_query_round_trip():
     database_url = os.environ.get("TEST_DATABASE_URL")
     if not database_url:
         pytest.skip("TEST_DATABASE_URL not set")
+
+    from rag_agent.postgres_store import PostgresRAGStore
 
     engine = init_engine(database_url)
     with engine.begin() as conn:

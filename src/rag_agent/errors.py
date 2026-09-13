@@ -19,6 +19,7 @@ class ErrorCode(StrEnum):
     EMBEDDING_FAILURE = "embedding_failure"
     DATABASE_UNAVAILABLE = "database_unavailable"
     VALIDATION_FAILED = "validation_failed"
+    RATE_LIMIT_EXCEEDED = "rate_limit_exceeded"
 
 
 class AppError(Exception):
@@ -127,6 +128,11 @@ class EmbeddingProviderError(AppError):
 class DatabaseUnavailableError(AppError):
     def __init__(self, message: str = "Database is temporarily unavailable.") -> None:
         super().__init__(ErrorCode.DATABASE_UNAVAILABLE, message, status_code=503, retryable=True)
+
+
+class RateLimitExceededError(AppError):
+    def __init__(self, message: str = "Rate limit exceeded.") -> None:
+        super().__init__(ErrorCode.RATE_LIMIT_EXCEEDED, message, status_code=429, retryable=True)
 
 
 class RequestValidationError(AppError):

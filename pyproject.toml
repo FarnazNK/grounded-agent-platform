@@ -21,8 +21,6 @@ dependencies = [
     "pypdf>=6.14.2",
     "langchain-anthropic>=0.3.0",
     "langchain-openai>=0.2.10",
-    "structlog>=24.4",
-    "tenacity>=9.0",
     "typer>=0.13",
     "rich>=13.9",
     "pyyaml>=6.0",
@@ -60,6 +58,7 @@ ignore = ["B008"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+pythonpath = ["src"]
 asyncio_mode = "auto"
 addopts = "-ra --strict-markers"
 markers = [
