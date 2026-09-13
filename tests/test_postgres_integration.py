@@ -66,3 +66,6 @@ def test_postgres_ingestion_and_query_round_trip():
     )
     assert result.chunks
     assert result.chunks[0].source_name == "postgres.md"
+    assert isinstance(result.chunks[0].chunk_id, str)
+    assert isinstance(result.chunks[0].document_id, str)
+    assert result.chunks[0].document_id == document.id
