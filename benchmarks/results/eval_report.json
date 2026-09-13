@@ -1,0 +1,99 @@
+{
+  "dataset_name": "core-rag-regression",
+  "metrics": {
+    "retrieval_precision": 0.16666666666666666,
+    "retrieval_recall": 0.6666666666666666,
+    "hit_rate": 0.6666666666666666,
+    "mrr": 0.3333333333333333,
+    "answer_relevance": 0.6666666666666666,
+    "groundedness": 1.0,
+    "citation_correctness": 0.6666666666666666,
+    "hallucination_rate": 0.0,
+    "latency_p95_ms": 0.973001999909684,
+    "token_usage_total": 235.0,
+    "estimated_cost_usd_total": 0.0
+  },
+  "cases": [
+    {
+      "case_id": "pto",
+      "metrics": {
+        "precision": 0.25,
+        "recall": 1.0,
+        "hit_rate": 1.0,
+        "mrr": 0.5,
+        "answer_relevance": 1.0,
+        "groundedness": 1.0,
+        "citation_correctness": 1.0,
+        "hallucination_rate": 0.0,
+        "latency_ms": 1.0925359999873763,
+        "total_tokens": 74,
+        "estimated_cost_usd": 0.0
+      },
+      "answer": "Answer derived from tenant-scoped corpus only: # VPN Access Cisco AnyConnect is the company VPN. Required for: - Access to internal admin tools - Access to staging and production environments - Working from public networks Split tunneling is enabled \u2014 only company traffic flows through the VPN. Personal browsing does not. Connection issues: see the troubleshooting doc in the IT portal, or page #it-help. [source: vpn_access.md] [source: pto_policy.md]",
+      "citations": [
+        "pto_policy.md",
+        "vpn_access.md"
+      ],
+      "sources": [
+        "vpn_access.md",
+        "pto_policy.md",
+        "buddy_program.md",
+        "acceptable_use.md"
+      ]
+    },
+    {
+      "case_id": "parental",
+      "metrics": {
+        "precision": 0.25,
+        "recall": 1.0,
+        "hit_rate": 1.0,
+        "mrr": 0.5,
+        "answer_relevance": 1.0,
+        "groundedness": 1.0,
+        "citation_correctness": 1.0,
+        "hallucination_rate": 0.0,
+        "latency_ms": 0.973001999909684,
+        "total_tokens": 96,
+        "estimated_cost_usd": 0.0
+      },
+      "answer": "Answer derived from tenant-scoped corpus only: # Software Installation Policy ## Pre-approved software The Self Service portal lists ~200 pre-approved tools. Install freely. ## Requesting new software - File a ticket in #it-help with the tool name, vendor, and use case. - Security review: 3 business days for SaaS, 5 business days for desktop apps. - AI tools require additional data-handling review. ## Personal accounts Do not use personal accounts for work-related tools. All subscriptions go through the procurement process so we can manage data flows centrally. [source: software_installation.md] [source: parental_leave_policy.md]",
+      "citations": [
+        "parental_leave_policy.md",
+        "software_installation.md"
+      ],
+      "sources": [
+        "software_installation.md",
+        "parental_leave_policy.md",
+        "home_office_stipend.md",
+        "acceptable_use.md"
+      ]
+    },
+    {
+      "case_id": "password",
+      "metrics": {
+        "precision": 0.0,
+        "recall": 0.0,
+        "hit_rate": 0.0,
+        "mrr": 0.0,
+        "answer_relevance": 0.0,
+        "groundedness": 1.0,
+        "citation_correctness": 0.0,
+        "hallucination_rate": 0.0,
+        "latency_ms": 0.952912999991895,
+        "total_tokens": 65,
+        "estimated_cost_usd": 0.0
+      },
+      "answer": "Answer derived from tenant-scoped corpus only: # Anti-Harassment Policy Harassment of any kind is not tolerated. Reporting channels: - Your manager - Your HR business partner - The anonymous ethics hotline (number on the back of your badge) - Skip-level or VP Investigations are conducted promptly and confidentially. Retaliation against reporters is itself a terminable offense. [source: anti_harassment.md] [source: doc_writing_standards.md]",
+      "citations": [
+        "anti_harassment.md",
+        "doc_writing_standards.md"
+      ],
+      "sources": [
+        "anti_harassment.md",
+        "doc_writing_standards.md",
+        "equal_opportunity.md",
+        "parental_leave_policy.md"
+      ]
+    }
+  ]
+}

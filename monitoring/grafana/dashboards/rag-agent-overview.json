@@ -1,0 +1,14 @@
+{
+  "title": "RAG Agent Overview",
+  "timezone": "browser",
+  "panels": [
+    {"type": "timeseries", "title": "Request throughput", "targets": [{"expr": "sum(rate(rag_agent_requests_total[5m]))"}]},
+    {"type": "timeseries", "title": "P95 latency", "targets": [{"expr": "histogram_quantile(0.95, sum(rate(rag_agent_request_latency_seconds_bucket[5m])) by (le))"}]},
+    {"type": "timeseries", "title": "Errors", "targets": [{"expr": "sum(rate(rag_agent_errors_total[5m])) by (code)"}]},
+    {"type": "timeseries", "title": "Retrieval latency", "targets": [{"expr": "histogram_quantile(0.95, sum(rate(rag_agent_retrieval_latency_seconds_bucket[5m])) by (le))"}]},
+    {"type": "timeseries", "title": "LLM usage", "targets": [{"expr": "sum(rate(rag_agent_tokens_total[5m])) by (type)"}]},
+    {"type": "timeseries", "title": "Ingestion failures", "targets": [{"expr": "sum(rate(rag_agent_ingestion_failures_total[5m])) by (reason)"}]}
+  ],
+  "schemaVersion": 39,
+  "version": 1
+}

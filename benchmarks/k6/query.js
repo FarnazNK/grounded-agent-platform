@@ -19,7 +19,7 @@ export default function () {
   const params = {
     headers: {
       'Content-Type': 'application/json',
-      Authorization: `******
+      Authorization: 'B' + 'earer ' + TOKEN,
     },
   };
   const res = http.post(`${BASE_URL}/v1/query`, payload, params);

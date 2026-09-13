@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import re
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Callable
 
 from rag_agent.auth import create_access_token, hash_password, verify_password
 from rag_agent.cache import TTLCache
@@ -21,7 +21,12 @@ from rag_agent.errors import (
     TokenLimitExceededError,
     WorkspaceNotFoundError,
 )
-from rag_agent.guardrails import PIIDetector, PIILeakDetector, PromptInjectionDetector, apply_guardrails
+from rag_agent.guardrails import (
+    PIIDetector,
+    PIILeakDetector,
+    PromptInjectionDetector,
+    apply_guardrails,
+)
 from rag_agent.guardrails.base import GuardrailAction, GuardrailViolation
 from rag_agent.guardrails.output_filters import SourceCitationChecker
 from rag_agent.llm import LLMProvider, build_llm_provider
@@ -62,7 +67,7 @@ class SlidingWindowRateLimiter:
         cutoff = now - 60
         events = [event for event in self._events.get(key, []) if event >= cutoff]
         if len(events) >= self._limit:
-            raise AuthorizationFailedError('Rate limit exceeded for this principal.')
+            raise AuthorizationFailedError("Rate limit exceeded for this principal.")
         events.append(now)
         self._events[key] = events
 
@@ -84,8 +89,12 @@ class RAGService:
         self.embeddings = embedding_service or build_embedding_service(self.settings)
         self.llm = llm_provider or build_llm_provider(self.settings)
         self.retriever = HybridRetriever(store, self.settings)
-        self.retrieval_cache = retrieval_cache or TTLCache[str, QueryResult](self.settings.retrieval_cache_ttl_seconds)
-        self.rate_limiter = rate_limiter or SlidingWindowRateLimiter(self.settings.rate_limit_requests_per_minute)
+        self.retrieval_cache = retrieval_cache or TTLCache[str, QueryResult](
+            self.settings.retrieval_cache_ttl_seconds
+        )
+        self.rate_limiter = rate_limiter or SlidingWindowRateLimiter(
+            self.settings.rate_limit_requests_per_minute
+        )
         self._now = now or (lambda: datetime.now(UTC))
 
     def bootstrap_admin(
@@ -99,9 +108,9 @@ class RAGService:
         workspace_name: str,
     ) -> WorkspaceMembership:
         if not self.settings.enable_bootstrap_admin and self.store.user_count() > 0:
-            raise AuthorizationFailedError('Bootstrap is disabled.')
+            raise AuthorizationFailedError("Bootstrap is disabled.")
         if self.store.get_user_by_email(email):
-            raise RequestValidationError('User already exists.')
+            raise RequestValidationError("User already exists.")
         user = self.store.create_user(email, hash_password(password))
         org = self.store.create_organization(organization_slug, organization_name)
         workspace = self.store.create_workspace(org.id, workspace_slug, workspace_name)
@@ -111,31 +120,41 @@ class RAGService:
     def authenticate(self, email: str, password: str) -> AuthResult:
         user = self.store.get_user_by_email(email)
         if not user or not verify_password(password, user.password_hash):
-            raise AuthenticationRequiredError('Invalid email or password.')
+            raise AuthenticationRequiredError("Invalid email or password.")
         return AuthResult(access_token=create_access_token(user.id), user=user)
 
     def get_user(self, user_id: str) -> UserRecord:
         user = self.store.get_user(user_id)
         if not user:
-            raise AuthenticationRequiredError('Authenticated user no longer exists.')
+            raise AuthenticationRequiredError("Authenticated user no longer exists.")
         return user
 
     def list_workspaces(self, user_id: str) -> list[WorkspaceMembership]:
         return self.store.list_user_workspaces(user_id)
 
-    def _require_workspace_role(self, user_id: str, workspace_id: str, minimum: MembershipRole) -> WorkspaceRecord:
+    def _require_workspace_role(
+        self, user_id: str, workspace_id: str, minimum: MembershipRole
+    ) -> WorkspaceRecord:
         workspace = self.store.get_workspace(workspace_id)
         if not workspace:
             raise WorkspaceNotFoundError(workspace_id)
         membership = self.store.get_membership(user_id, workspace_id)
         if not membership:
-            raise AuthorizationFailedError('You are not a member of this workspace.')
+            raise AuthorizationFailedError("You are not a member of this workspace.")
         order = {MembershipRole.viewer: 0, MembershipRole.editor: 1, MembershipRole.admin: 2}
         if order[membership.role] < order[minimum]:
-            raise AuthorizationFailedError(f'{minimum.value} role is required for this operation.')
+            raise AuthorizationFailedError(f"{minimum.value} role is required for this operation.")
         return workspace
 
-    def ingest_document(self, *, user_id: str, workspace_id: str, filename: str, content_type: str | None, data: bytes) -> tuple[DocumentRecord, IngestionJobRecord]:
+    def ingest_document(
+        self,
+        *,
+        user_id: str,
+        workspace_id: str,
+        filename: str,
+        content_type: str | None,
+        data: bytes,
+    ) -> tuple[DocumentRecord, IngestionJobRecord]:
         self._require_workspace_role(user_id, workspace_id, MembershipRole.editor)
         parsed = parse_document_bytes(filename, content_type, data, settings=self.settings)
         duplicate = self.store.find_active_document_by_sha(workspace_id, parsed.sha256)
@@ -145,14 +164,17 @@ class RAGService:
                     workspace_id=workspace_id,
                     requested_by_user_id=user_id,
                     document_id=duplicate.id,
-                    operation='upload',
+                    operation="upload",
                     status=IngestionStatus.duplicate,
-                    error_code='duplicate_ingestion',
-                    error_message='An active document with the same content already exists.',
+                    error_code="duplicate_ingestion",
+                    error_message="An active document with the same content already exists.",
                     completed_at=self._now(),
                 )
             )
-            raise DuplicateIngestionError('Duplicate ingestion request rejected.', details={'document_id': duplicate.id, 'job_id': job.id})
+            raise DuplicateIngestionError(
+                "Duplicate ingestion request rejected.",
+                details={"document_id": duplicate.id, "job_id": job.id},
+            )
 
         document = self.store.create_document(
             DocumentRecord(
@@ -172,14 +194,18 @@ class RAGService:
                 workspace_id=workspace_id,
                 requested_by_user_id=user_id,
                 document_id=document.id,
-                operation='upload',
+                operation="upload",
                 status=IngestionStatus.pending,
             )
         )
         return self._index_document(document=document, job=job)
 
-    def _index_document(self, *, document: DocumentRecord, job: IngestionJobRecord) -> tuple[DocumentRecord, IngestionJobRecord]:
-        self.store.update_ingestion_job(job.id, status=IngestionStatus.processing, attempt_count=job.attempt_count + 1)
+    def _index_document(
+        self, *, document: DocumentRecord, job: IngestionJobRecord
+    ) -> tuple[DocumentRecord, IngestionJobRecord]:
+        self.store.update_ingestion_job(
+            job.id, status=IngestionStatus.processing, attempt_count=job.attempt_count + 1
+        )
         self.store.update_document(document.id, status=DocumentStatus.processing)
         try:
             chunks = chunk_text(document.content_text, settings=self.settings)
@@ -196,34 +222,65 @@ class RAGService:
                 )
                 for chunk, embedding in zip(chunks, embeddings, strict=True)
             ]
-            self.store.replace_document_chunks(document.id, document.workspace_id, records, self.settings.embedding_model)
+            self.store.replace_document_chunks(
+                document.id, document.workspace_id, records, self.settings.embedding_model
+            )
             document = self.store.update_document(
                 document.id,
                 status=DocumentStatus.ready,
-                metadata={**document.metadata, 'chunk_count': len(records)},
+                metadata={**document.metadata, "chunk_count": len(records)},
                 error_code=None,
                 error_message=None,
             )
             self.store.bump_workspace_index_version(document.workspace_id)
-            self.retrieval_cache.invalidate_prefix(f'{document.workspace_id}:')
-            job = self.store.update_ingestion_job(job.id, status=IngestionStatus.completed, completed_at=self._now(), error_code=None, error_message=None)
+            self.retrieval_cache.invalidate_prefix(f"{document.workspace_id}:")
+            job = self.store.update_ingestion_job(
+                job.id,
+                status=IngestionStatus.completed,
+                completed_at=self._now(),
+                error_code=None,
+                error_message=None,
+            )
             return document, job
         except Exception as exc:
             self.store.delete_document_chunks(document.id)
-            self.store.update_document(document.id, status=DocumentStatus.failed, error_code=getattr(exc, 'code', 'ingestion_failed'), error_message=str(exc))
-            self.store.update_ingestion_job(job.id, status=IngestionStatus.failed, completed_at=self._now(), error_code=getattr(exc, 'code', 'ingestion_failed'), error_message=str(exc))
-            log.warning('ingestion.failed', document_id=document.id, error=str(exc))
+            self.store.update_document(
+                document.id,
+                status=DocumentStatus.failed,
+                error_code=getattr(exc, "code", "ingestion_failed"),
+                error_message=str(exc),
+            )
+            self.store.update_ingestion_job(
+                job.id,
+                status=IngestionStatus.failed,
+                completed_at=self._now(),
+                error_code=getattr(exc, "code", "ingestion_failed"),
+                error_message=str(exc),
+            )
+            log.warning("ingestion.failed", document_id=document.id, error=str(exc))
             raise
 
-    def reindex_document(self, *, user_id: str, workspace_id: str, document_id: str) -> tuple[DocumentRecord, IngestionJobRecord]:
+    def reindex_document(
+        self, *, user_id: str, workspace_id: str, document_id: str
+    ) -> tuple[DocumentRecord, IngestionJobRecord]:
         self._require_workspace_role(user_id, workspace_id, MembershipRole.editor)
         document = self.store.get_document(document_id, workspace_id)
         if not document or document.status == DocumentStatus.deleted:
             raise DocumentNotFoundError(document_id)
-        job = self.store.create_ingestion_job(IngestionJobRecord(workspace_id=workspace_id, requested_by_user_id=user_id, document_id=document_id, operation='reindex', status=IngestionStatus.pending))
+        job = self.store.create_ingestion_job(
+            IngestionJobRecord(
+                workspace_id=workspace_id,
+                requested_by_user_id=user_id,
+                document_id=document_id,
+                operation="reindex",
+                status=IngestionStatus.pending,
+            )
+        )
         return self._index_document(document=document, job=job)
 
-    def delete_document(self, *, user_id: str, workspace_id: str, document_id: str) -> tuple[DocumentRecord, IngestionJobRecord]:
+    def delete_document(
+        self, *, user_id: str, workspace_id: str, document_id: str
+    ) -> tuple[DocumentRecord, IngestionJobRecord]:
         self._require_workspace_role(user_id, workspace_id, MembershipRole.editor)
         document = self.store.get_document(document_id, workspace_id)
         if not document:
@@ -231,8 +288,17 @@ class RAGService:
         self.store.delete_document_chunks(document_id)
         document = self.store.update_document(document_id, status=DocumentStatus.deleted)
         self.store.bump_workspace_index_version(workspace_id)
-        self.retrieval_cache.invalidate_prefix(f'{workspace_id}:')
-        job = self.store.create_ingestion_job(IngestionJobRecord(workspace_id=workspace_id, requested_by_user_id=user_id, document_id=document_id, operation='delete', status=IngestionStatus.completed, completed_at=self._now()))
+        self.retrieval_cache.invalidate_prefix(f"{workspace_id}:")
+        job = self.store.create_ingestion_job(
+            IngestionJobRecord(
+                workspace_id=workspace_id,
+                requested_by_user_id=user_id,
+                document_id=document_id,
+                operation="delete",
+                status=IngestionStatus.completed,
+                completed_at=self._now(),
+            )
+        )
         return document, job
 
     def get_document(self, *, user_id: str, workspace_id: str, document_id: str) -> DocumentRecord:
@@ -246,7 +312,9 @@ class RAGService:
         self._require_workspace_role(user_id, workspace_id, MembershipRole.viewer)
         return self.store.list_documents(workspace_id)
 
-    def get_ingestion_job(self, *, user_id: str, workspace_id: str, job_id: str) -> IngestionJobRecord:
+    def get_ingestion_job(
+        self, *, user_id: str, workspace_id: str, job_id: str
+    ) -> IngestionJobRecord:
         self._require_workspace_role(user_id, workspace_id, MembershipRole.viewer)
         job = self.store.get_ingestion_job(job_id)
         if not job or job.workspace_id != workspace_id:
@@ -255,32 +323,47 @@ class RAGService:
 
     def query(self, *, user_id: str, workspace_id: str, query: str, request_id: str) -> QueryResult:
         workspace = self._require_workspace_role(user_id, workspace_id, MembershipRole.viewer)
-        self.rate_limiter.check(f'{user_id}:{workspace_id}:query')
+        self.rate_limiter.check(f"{user_id}:{workspace_id}:query")
         if len(query.split()) * 4 > self.settings.llm_max_prompt_tokens:
             raise TokenLimitExceededError()
         try:
             sanitized_query, _ = apply_guardrails(query, [PIIDetector(), PromptInjectionDetector()])
         except GuardrailViolation as exc:
             if exc.decision.action == GuardrailAction.BLOCK:
-                return QueryResult(request_id=request_id, answer='Request blocked by guardrail.', refusal=True, grounded=True)
+                return QueryResult(
+                    request_id=request_id,
+                    answer="Request blocked by guardrail.",
+                    refusal=True,
+                    grounded=True,
+                )
             raise
-        cache_key = f'{workspace.id}:{workspace.index_version}:{sanitized_query}:{self.settings.top_k_final}'
+        cache_key = (
+            f"{workspace.id}:{workspace.index_version}:"
+            f"{sanitized_query}:{self.settings.top_k_final}"
+        )
         cached = self.retrieval_cache.get(cache_key)
         if cached is not None:
-            return cached.model_copy(update={'request_id': request_id, 'cached': True})
+            return cached.model_copy(update={"request_id": request_id, "cached": True})
 
         start = time.perf_counter()
         query_embedding = self.embeddings.embed_query(sanitized_query)
-        chunks, retrieval_metrics = self.retriever.retrieve(workspace_id, sanitized_query, query_embedding)
+        chunks, retrieval_metrics = self.retriever.retrieve(
+            workspace_id, sanitized_query, query_embedding
+        )
         llm_result = self.llm.answer_question(sanitized_query, chunks)
         output_text, _ = apply_guardrails(
             llm_result.text,
-            [PIILeakDetector(), SourceCitationChecker(valid_sources=frozenset(chunk.source_name for chunk in chunks))],
+            [
+                PIILeakDetector(),
+                SourceCitationChecker(
+                    valid_sources=frozenset(chunk.source_name for chunk in chunks)
+                ),
+            ],
             raise_on_block=False,
         )
         if not output_text.strip():
             raise MalformedLLMOutputError()
-        citations = sorted(set(re.findall(r'\[source:\s*([^\]]+)\]', output_text, flags=re.I)))
+        citations = sorted(set(re.findall(r"\[source:\s*([^\]]+)\]", output_text, flags=re.I)))
         result = QueryResult(
             request_id=request_id,
             answer=output_text,
@@ -289,9 +372,9 @@ class RAGService:
             usage=llm_result.usage,
             latency=LatencyBreakdown(
                 total_ms=(time.perf_counter() - start) * 1000,
-                retrieval_ms=retrieval_metrics['dense_ms'] + retrieval_metrics['sparse_ms'],
+                retrieval_ms=retrieval_metrics["dense_ms"] + retrieval_metrics["sparse_ms"],
                 llm_ms=llm_result.latency_ms,
-                db_ms=retrieval_metrics['db_ms'],
+                db_ms=retrieval_metrics["db_ms"],
             ),
             cached=False,
             grounded=set(citations).issubset({chunk.source_name for chunk in chunks}),

@@ -3,8 +3,9 @@ from __future__ import annotations
 import logging
 import os
 import sys
+from collections.abc import Iterator
 from contextlib import contextmanager
-from typing import Any, Iterator
+from typing import Any
 
 import structlog
 from structlog.contextvars import bind_contextvars, clear_contextvars
@@ -20,12 +21,12 @@ def configure_logging() -> None:
         return
     settings = get_settings()
     level = getattr(logging, settings.log_level.upper(), logging.INFO)
-    logging.basicConfig(format='%(message)s', stream=sys.stderr, level=level)
+    logging.basicConfig(format="%(message)s", stream=sys.stderr, level=level)
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
             structlog.processors.add_log_level,
-            structlog.processors.TimeStamper(fmt='iso'),
+            structlog.processors.TimeStamper(fmt="iso"),
             structlog.processors.StackInfoRenderer(),
             structlog.processors.format_exc_info,
             structlog.processors.JSONRenderer(),
@@ -37,11 +38,11 @@ def configure_logging() -> None:
 
 
 def maybe_enable_langsmith() -> bool:
-    if not os.environ.get('LANGSMITH_API_KEY') and not os.environ.get('LANGCHAIN_API_KEY'):
+    if not os.environ.get("LANGSMITH_API_KEY") and not os.environ.get("LANGCHAIN_API_KEY"):
         return False
     settings = get_settings()
-    os.environ.setdefault('LANGCHAIN_TRACING_V2', 'true')
-    os.environ.setdefault('LANGCHAIN_PROJECT', settings.langsmith_project)
+    os.environ.setdefault("LANGCHAIN_TRACING_V2", "true")
+    os.environ.setdefault("LANGCHAIN_PROJECT", settings.langsmith_project)
     return True
 
 

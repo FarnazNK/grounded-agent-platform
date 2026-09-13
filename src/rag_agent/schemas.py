@@ -9,25 +9,25 @@ from pydantic import BaseModel, Field
 
 
 class MembershipRole(StrEnum):
-    viewer = 'viewer'
-    editor = 'editor'
-    admin = 'admin'
+    viewer = "viewer"
+    editor = "editor"
+    admin = "admin"
 
 
 class DocumentStatus(StrEnum):
-    pending = 'pending'
-    processing = 'processing'
-    ready = 'ready'
-    failed = 'failed'
-    deleted = 'deleted'
+    pending = "pending"
+    processing = "processing"
+    ready = "ready"
+    failed = "failed"
+    deleted = "deleted"
 
 
 class IngestionStatus(StrEnum):
-    pending = 'pending'
-    processing = 'processing'
-    completed = 'completed'
-    failed = 'failed'
-    duplicate = 'duplicate'
+    pending = "pending"
+    processing = "processing"
+    completed = "completed"
+    failed = "failed"
+    duplicate = "duplicate"
 
 
 class RetrievedChunk(BaseModel):
@@ -41,7 +41,7 @@ class RetrievedChunk(BaseModel):
     metadata: dict[str, Any] = Field(default_factory=dict)
 
     def as_citation(self) -> str:
-        return f'[source: {self.source_name}]'
+        return f"[source: {self.source_name}]"
 
 
 class UsageInfo(BaseModel):
@@ -77,7 +77,7 @@ class OrganizationRecord(BaseModel):
     name: str
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
-    model_config = {'from_attributes': True}
+    model_config = {"from_attributes": True}
 
 
 class WorkspaceRecord(BaseModel):
@@ -88,7 +88,7 @@ class WorkspaceRecord(BaseModel):
     index_version: int = 1
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
-    model_config = {'from_attributes': True}
+    model_config = {"from_attributes": True}
 
 
 class UserRecord(BaseModel):
@@ -98,7 +98,7 @@ class UserRecord(BaseModel):
     is_active: bool = True
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
-    model_config = {'from_attributes': True}
+    model_config = {"from_attributes": True}
 
 
 class MembershipRecord(BaseModel):
@@ -109,7 +109,7 @@ class MembershipRecord(BaseModel):
     role: MembershipRole = MembershipRole.viewer
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
-    model_config = {'from_attributes': True}
+    model_config = {"from_attributes": True}
 
 
 class WorkspaceMembership(BaseModel):
@@ -127,14 +127,14 @@ class DocumentRecord(BaseModel):
     file_size: int
     sha256: str
     status: DocumentStatus = DocumentStatus.pending
-    content_text: str = ''
+    content_text: str = ""
     metadata: dict[str, Any] = Field(default_factory=dict)
     error_code: str | None = None
     error_message: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
 
-    model_config = {'from_attributes': True}
+    model_config = {"from_attributes": True}
 
 
 class ChunkRecord(BaseModel):
@@ -153,7 +153,7 @@ class IngestionJobRecord(BaseModel):
     workspace_id: str
     requested_by_user_id: str
     document_id: str | None = None
-    operation: str = 'upload'
+    operation: str = "upload"
     status: IngestionStatus = IngestionStatus.pending
     attempt_count: int = 0
     error_code: str | None = None
@@ -162,4 +162,4 @@ class IngestionJobRecord(BaseModel):
     updated_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     completed_at: datetime | None = None
 
-    model_config = {'from_attributes': True}
+    model_config = {"from_attributes": True}

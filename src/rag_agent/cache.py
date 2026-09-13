@@ -5,8 +5,8 @@ import time
 from dataclasses import dataclass
 from typing import Generic, TypeVar
 
-K = TypeVar('K')
-V = TypeVar('V')
+K = TypeVar("K")
+V = TypeVar("V")
 
 
 @dataclass

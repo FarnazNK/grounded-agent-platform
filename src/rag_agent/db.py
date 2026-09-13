@@ -49,7 +49,7 @@ def get_session() -> Iterator[Session]:
 def ping_database() -> None:
     try:
         with get_engine().connect() as conn:
-            conn.execute(text('SELECT 1'))
+            conn.execute(text("SELECT 1"))
     except OperationalError as exc:
-        log.warning('db.ping.failed', error=str(exc))
+        log.warning("db.ping.failed", error=str(exc))
         raise DatabaseUnavailableError() from exc
