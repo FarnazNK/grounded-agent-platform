@@ -319,8 +319,8 @@ class PostgresRAGStore:
             latency_ms = (time.perf_counter() - start) * 1000
             return [
                 RetrievedChunk(
-                    chunk_id=row["id"],
-                    document_id=row["document_id"],
+                    chunk_id=str(row["id"]),
+                    document_id=str(row["document_id"]),
                     source_name=row["source_name"],
                     content=row["content"],
                     fused_score=float(row["score"] or 0.0),
@@ -365,8 +365,8 @@ class PostgresRAGStore:
             latency_ms = (time.perf_counter() - start) * 1000
             return [
                 RetrievedChunk(
-                    chunk_id=row["id"],
-                    document_id=row["document_id"],
+                    chunk_id=str(row["id"]),
+                    document_id=str(row["document_id"]),
                     source_name=row["source_name"],
                     content=row["content"],
                     fused_score=float(row["score"] or 0.0),
