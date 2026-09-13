@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import math
+import re
 from copy import deepcopy
 from datetime import UTC, datetime
 from typing import Protocol
@@ -29,7 +30,9 @@ class RAGStore(Protocol):
     def get_user_by_email(self, email: str) -> UserRecord | None: ...
     def create_organization(self, slug: str, name: str) -> OrganizationRecord: ...
     def create_workspace(self, organization_id: str, slug: str, name: str) -> WorkspaceRecord: ...
-    def add_membership(self, user_id: str, organization_id: str, workspace_id: str, role: MembershipRole) -> MembershipRecord: ...
+    def add_membership(
+        self, user_id: str, organization_id: str, workspace_id: str, role: MembershipRole
+    ) -> MembershipRecord: ...
     def get_membership(self, user_id: str, workspace_id: str) -> MembershipRecord | None: ...
     def list_user_workspaces(self, user_id: str) -> list[WorkspaceMembership]: ...
     def get_workspace(self, workspace_id: str) -> WorkspaceRecord | None: ...
@@ -37,11 +40,19 @@ class RAGStore(Protocol):
     def update_document(self, document_id: str, **updates) -> DocumentRecord: ...
     def get_document(self, document_id: str, workspace_id: str) -> DocumentRecord | None: ...
     def list_documents(self, workspace_id: str) -> list[DocumentRecord]: ...
-    def find_active_document_by_sha(self, workspace_id: str, sha256: str) -> DocumentRecord | None: ...
-    def replace_document_chunks(self, document_id: str, workspace_id: str, chunks: list[ChunkRecord], embedding_model: str) -> None: ...
+    def find_active_document_by_sha(
+        self, workspace_id: str, sha256: str
+    ) -> DocumentRecord | None: ...
+    def replace_document_chunks(
+        self, document_id: str, workspace_id: str, chunks: list[ChunkRecord], embedding_model: str
+    ) -> None: ...
     def delete_document_chunks(self, document_id: str) -> None: ...
-    def dense_search(self, workspace_id: str, query_embedding: list[float], limit: int) -> tuple[list[RetrievedChunk], float]: ...
-    def lexical_search(self, workspace_id: str, query: str, limit: int) -> tuple[list[RetrievedChunk], float]: ...
+    def dense_search(
+        self, workspace_id: str, query_embedding: list[float], limit: int
+    ) -> tuple[list[RetrievedChunk], float]: ...
+    def lexical_search(
+        self, workspace_id: str, query: str, limit: int
+    ) -> tuple[list[RetrievedChunk], float]: ...
     def create_ingestion_job(self, record: IngestionJobRecord) -> IngestionJobRecord: ...
     def update_ingestion_job(self, job_id: str, **updates) -> IngestionJobRecord: ...
     def get_ingestion_job(self, job_id: str) -> IngestionJobRecord | None: ...
@@ -91,7 +102,9 @@ class InMemoryRAGStore:
         self.workspaces[record.id] = record
         return record
 
-    def add_membership(self, user_id: str, organization_id: str, workspace_id: str, role: MembershipRole) -> MembershipRecord:
+    def add_membership(
+        self, user_id: str, organization_id: str, workspace_id: str, role: MembershipRole
+    ) -> MembershipRecord:
         record = MembershipRecord(
             user_id=user_id,
             organization_id=organization_id,
@@ -114,7 +127,9 @@ class InMemoryRAGStore:
                 continue
             workspace = self.workspaces[membership.workspace_id]
             org = self.organizations[membership.organization_id]
-            results.append(WorkspaceMembership(workspace=workspace, organization=org, role=membership.role))
+            results.append(
+                WorkspaceMembership(workspace=workspace, organization=org, role=membership.role)
+            )
         return results
 
     def get_workspace(self, workspace_id: str) -> WorkspaceRecord | None:
@@ -128,7 +143,7 @@ class InMemoryRAGStore:
         record = self.documents[document_id].model_copy(deep=True)
         data = record.model_dump()
         data.update(updates)
-        data['updated_at'] = datetime.now(UTC)
+        data["updated_at"] = datetime.now(UTC)
         updated = DocumentRecord.model_validate(data)
         self.documents[document_id] = updated
         return deepcopy(updated)
@@ -140,24 +155,36 @@ class InMemoryRAGStore:
         return None
 
     def list_documents(self, workspace_id: str) -> list[DocumentRecord]:
-        return [deepcopy(doc) for doc in self.documents.values() if doc.workspace_id == workspace_id]
+        return [
+            deepcopy(doc) for doc in self.documents.values() if doc.workspace_id == workspace_id
+        ]
 
     def find_active_document_by_sha(self, workspace_id: str, sha256: str) -> DocumentRecord | None:
         for record in self.documents.values():
-            if record.workspace_id == workspace_id and record.sha256 == sha256 and record.status != DocumentStatus.deleted:
+            if (
+                record.workspace_id == workspace_id
+                and record.sha256 == sha256
+                and record.status != DocumentStatus.deleted
+            ):
                 return deepcopy(record)
         return None
 
-    def replace_document_chunks(self, document_id: str, workspace_id: str, chunks: list[ChunkRecord], embedding_model: str) -> None:
+    def replace_document_chunks(
+        self, document_id: str, workspace_id: str, chunks: list[ChunkRecord], embedding_model: str
+    ) -> None:
         self.delete_document_chunks(document_id)
         for chunk in chunks:
             self.chunks[chunk.id] = deepcopy(chunk)
 
     def delete_document_chunks(self, document_id: str) -> None:
-        for chunk_id in [key for key, value in self.chunks.items() if value.document_id == document_id]:
+        for chunk_id in [
+            key for key, value in self.chunks.items() if value.document_id == document_id
+        ]:
             self.chunks.pop(chunk_id, None)
 
-    def dense_search(self, workspace_id: str, query_embedding: list[float], limit: int) -> tuple[list[RetrievedChunk], float]:
+    def dense_search(
+        self, workspace_id: str, query_embedding: list[float], limit: int
+    ) -> tuple[list[RetrievedChunk], float]:
         scored: list[tuple[float, ChunkRecord, DocumentRecord]] = []
         for chunk in self.chunks.values():
             if chunk.workspace_id != workspace_id:
@@ -181,8 +208,10 @@ class InMemoryRAGStore:
             for score, chunk, doc in scored[:limit]
         ], 0.0
 
-    def lexical_search(self, workspace_id: str, query: str, limit: int) -> tuple[list[RetrievedChunk], float]:
-        query_terms = {term for term in query.lower().split() if term}
+    def lexical_search(
+        self, workspace_id: str, query: str, limit: int
+    ) -> tuple[list[RetrievedChunk], float]:
+        query_terms = set(_terms(query))
         scored: list[tuple[float, ChunkRecord, DocumentRecord]] = []
         for chunk in self.chunks.values():
             if chunk.workspace_id != workspace_id:
@@ -190,7 +219,7 @@ class InMemoryRAGStore:
             doc = self.documents.get(chunk.document_id)
             if not doc or doc.status != DocumentStatus.ready:
                 continue
-            doc_terms = set(chunk.content.lower().split())
+            doc_terms = set(_terms(chunk.content))
             overlap = len(query_terms & doc_terms)
             if overlap:
                 score = overlap / max(1, len(query_terms))
@@ -217,7 +246,7 @@ class InMemoryRAGStore:
         record = self.ingestion_jobs[job_id].model_copy(deep=True)
         data = record.model_dump()
         data.update(updates)
-        data['updated_at'] = datetime.now(UTC)
+        data["updated_at"] = datetime.now(UTC)
         updated = IngestionJobRecord.model_validate(data)
         self.ingestion_jobs[job_id] = updated
         return deepcopy(updated)
@@ -228,12 +257,14 @@ class InMemoryRAGStore:
 
     def bump_workspace_index_version(self, workspace_id: str) -> WorkspaceRecord:
         workspace = self.workspaces[workspace_id]
-        updated = workspace.model_copy(update={'index_version': workspace.index_version + 1})
+        updated = workspace.model_copy(update={"index_version": workspace.index_version + 1})
         self.workspaces[workspace_id] = updated
         return deepcopy(updated)
 
     def corpus_counts(self) -> tuple[int, int]:
-        document_count = sum(1 for doc in self.documents.values() if doc.status == DocumentStatus.ready)
+        document_count = sum(
+            1 for doc in self.documents.values() if doc.status == DocumentStatus.ready
+        )
         return document_count, len(self.chunks)
 
 
@@ -246,3 +277,7 @@ def _cosine_similarity(a: list[float], b: list[float]) -> float:
     if not norm_a or not norm_b:
         return 0.0
     return max(0.0, dot / (norm_a * norm_b))
+
+
+def _terms(text: str) -> list[str]:
+    return re.findall(r"[a-z0-9]+", text.lower())

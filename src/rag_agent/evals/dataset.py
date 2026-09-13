@@ -17,11 +17,11 @@ class EvalCase(BaseModel):
 
 class EvalDataset(BaseModel):
     name: str
-    description: str = ''
+    description: str = ""
     corpus_dir: str
     cases: list[EvalCase]
 
 
 def load_dataset(path: Path | str) -> EvalDataset:
-    raw = yaml.safe_load(Path(path).read_text(encoding='utf-8'))
+    raw = yaml.safe_load(Path(path).read_text(encoding="utf-8"))
     return EvalDataset.model_validate(raw)

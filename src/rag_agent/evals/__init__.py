@@ -1,37 +1,13 @@
-"""Evaluation harness.
-
-A small, honest eval framework. Not a full LangSmith replacement — but enough
-to (a) catch regressions before shipping, (b) surface which cases fail and why,
-and (c) show the seams where a larger eval platform would plug in.
-
-The three pieces:
-    - `dataset`: loading YAML test cases into typed `EvalCase` objects
-    - `scorers`: pluggable scoring functions (exact match, contains, LLM-judge)
-    - `runner`: executes cases against an Agent, aggregates, prints a report
-"""
-
 from rag_agent.evals.dataset import EvalCase, EvalDataset, load_dataset
-from rag_agent.evals.runner import EvalReport, EvalResult, run_evaluation
-from rag_agent.evals.scorers import (
-    ContainsScorer,
-    ExactMatchScorer,
-    LLMJudgeScorer,
-    RetrievalRecallScorer,
-    Scorer,
-    ScoreResult,
-)
+from rag_agent.evals.runner import EvaluationReport, run_evaluation
+from rag_agent.evals.scorers import CaseMetrics, score_case
 
 __all__ = [
-    "ContainsScorer",
+    "CaseMetrics",
     "EvalCase",
     "EvalDataset",
-    "EvalReport",
-    "EvalResult",
-    "ExactMatchScorer",
-    "LLMJudgeScorer",
-    "RetrievalRecallScorer",
-    "ScoreResult",
-    "Scorer",
+    "EvaluationReport",
     "load_dataset",
     "run_evaluation",
+    "score_case",
 ]

@@ -1,64 +1,56 @@
-# docker-compose for local development and CI smoke tests.
-#
-# `docker compose up api` starts the API on :8000 with persistent vectors
-# in the named volume `rag_chroma`. The `evals` service is a one-shot job
-# you run with `docker compose run --rm evals` after the API is healthy.
-
 services:
-  api:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    image: rag-agent:local
-    container_name: rag-agent-api
-    ports:
-      - "8000:8000"
+  postgres:
+    image: pgvector/pgvector:pg16
     environment:
-      # Anthropic + OpenAI keys are required at runtime. Source from a .env
-      # file in the project root (gitignored).
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:?OPENAI_API_KEY is required}
-      - APP_LOG_LEVEL=${APP_LOG_LEVEL:-INFO}
-      - APP_LLM_MODEL=${APP_LLM_MODEL:-claude-sonnet-4-5}
-      # Optional: set LANGSMITH_API_KEY to enable tracing.
-      - LANGSMITH_API_KEY=${LANGSMITH_API_KEY:-}
-    volumes:
-      # Persist Chroma data across container restarts.
-      - rag_chroma:/data/chroma
-      # Mount the corpus read-only so iterating on docs doesn't require rebuild.
-      - ./data/sample_corpus_extended:/app/data/sample_corpus_extended:ro
+      POSTGRES_USER: rag_agent
+      POSTGRES_DB: rag_agent
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - '5432:5432'
     healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health', timeout=3)"]
-      interval: 30s
+      test: ['CMD-SHELL', 'pg_isready -U rag_agent -d rag_agent']
+      interval: 10s
       timeout: 5s
-      retries: 3
-      start_period: 20s
+      retries: 10
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
 
-  # One-shot eval runner. Uses the same image as the API.
-  # Usage:  docker compose run --rm evals
-  evals:
-    image: rag-agent:local
-    container_name: rag-agent-evals
-    profiles: ["tools"]   # exclude from `docker compose up`; only run on demand
+  api:
+    build: .
     depends_on:
-      api:
+      postgres:
         condition: service_healthy
     environment:
-      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:?}
-      - OPENAI_API_KEY=${OPENAI_API_KEY:?}
+      APP_ENV: dev
+      APP_DATABASE_URL: postgresql+psycopg://rag_agent@postgres:5432/rag_agent
+      APP_JWT_SECRET: local-development-secret-local-development-secret
+      APP_ENABLE_BOOTSTRAP_ADMIN: 'true'
+      APP_LLM_PROVIDER: deterministic
+      APP_EMBEDDING_PROVIDER: deterministic
+      APP_LOG_LEVEL: INFO
+    ports:
+      - '8000:8000'
+
+  prometheus:
+    image: prom/prometheus:v2.55.1
     volumes:
-      - rag_chroma:/data/chroma
-      - ./data:/app/data:ro
-      - ./benchmarks/results:/app/benchmarks/results
-    command:
-      - python
-      - scripts/run_evals.py
-      - --dataset
-      - data/eval_datasets/hr_full.yaml
-      - --out
-      - benchmarks/results/last_run.json
-      - --fail-under
-      - "0.7"
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - '9090:9090'
+    depends_on:
+      - api
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: admin
+    volumes:
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+    ports:
+      - '3000:3000'
+    depends_on:
+      - prometheus
 
 volumes:
-  rag_chroma:
+  postgres-data:

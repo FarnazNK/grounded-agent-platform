@@ -30,13 +30,23 @@ def score_case(case: EvalCase, result: QueryResult) -> CaseMetrics:
     precision = len(hits) / max(1, len(retrieved_set))
     recall = len(hits) / max(1, len(expected_set)) if expected_set else 1.0
     hit_rate = 1.0 if hits else 0.0
-    rank = next((index + 1 for index, source in enumerate(retrieved) if source in expected_set), None)
+    rank = next(
+        (index + 1 for index, source in enumerate(retrieved) if source in expected_set), None
+    )
     mrr = 1.0 / rank if rank else 0.0
-    contains_hits = [snippet for snippet in case.expected_contains if snippet.lower() in result.answer.lower()]
-    answer_relevance = len(contains_hits) / max(1, len(case.expected_contains)) if case.expected_contains else 1.0
+    contains_hits = [
+        snippet for snippet in case.expected_contains if snippet.lower() in result.answer.lower()
+    ]
+    answer_relevance = (
+        len(contains_hits) / max(1, len(case.expected_contains)) if case.expected_contains else 1.0
+    )
     expected_citations = set(case.expected_citations or expected)
     actual_citations = set(result.citations)
-    citation_correctness = len(expected_citations & actual_citations) / max(1, len(expected_citations)) if expected_citations else 1.0
+    citation_correctness = (
+        len(expected_citations & actual_citations) / max(1, len(expected_citations))
+        if expected_citations
+        else 1.0
+    )
     groundedness = 1.0 if result.grounded else 0.0
     hallucination_rate = 0.0 if result.grounded else 1.0
     return CaseMetrics(

@@ -11,14 +11,14 @@ from rag_agent.schemas import (
 )
 
 __all__ = [
-    'create_app',
-    'DocumentRecord',
-    'IngestionJobRecord',
-    'MembershipRecord',
-    'QueryResult',
-    'RetrievedChunk',
-    'UserRecord',
-    'WorkspaceMembership',
-    'WorkspaceRecord',
+    "DocumentRecord",
+    "IngestionJobRecord",
+    "MembershipRecord",
+    "QueryResult",
+    "RetrievedChunk",
+    "UserRecord",
+    "WorkspaceMembership",
+    "WorkspaceRecord",
+    "create_app",
 ]
-__version__ = '1.0.0'
+__version__ = "1.0.0"
