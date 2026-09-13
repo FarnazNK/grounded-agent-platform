@@ -15,7 +15,7 @@
 
 RAG Agent is a multi-tenant retrieval-augmented generation API for document ingestion, hybrid retrieval, grounded answers, evaluation, and operational reliability. It combines FastAPI with PostgreSQL/pgvector, lexical search, weighted reciprocal-rank fusion, authentication, guardrails, observability, and reproducible quality gates.
 
-> **Status:** The repository includes a complete local Docker Compose stack, PostgreSQL/pgvector persistence, JWT authentication, workspace-scoped retrieval, Prometheus/Grafana monitoring, Terraform infrastructure, evaluation datasets, and GitHub Actions CI. The API is not presented as a publicly hosted production service; deployment still requires managed infrastructure, production secrets, and provider credentials.
+> **Status:** A public portfolio API is live on Render with managed Neon PostgreSQL/pgvector and deterministic providers. The repository also includes a complete local Docker Compose stack, JWT authentication, workspace-scoped retrieval, Prometheus/Grafana monitoring, Terraform infrastructure, evaluation datasets, and GitHub Actions CI. The hosted instance is a demo deployment rather than a production SLA.
 
 ## Highlights
 
@@ -129,16 +129,28 @@ Dense retrieval provides semantic matching while lexical retrieval preserves exa
 
 ## Deployment status
 
-The repository is designed to run locally as a complete containerized stack and includes Terraform scaffolding for managed environments. It does **not** claim a public production deployment.
+A public portfolio/demo API is currently deployed on Render:
 
-Local services:
+- **API / docs:** <https://rag-agent-api-2uau.onrender.com/>
+- **Liveness:** <https://rag-agent-api-2uau.onrender.com/health/live>
+- **Readiness:** <https://rag-agent-api-2uau.onrender.com/health/ready>
+- **OpenAPI docs:** <https://rag-agent-api-2uau.onrender.com/docs>
+
+The hosted service uses managed Neon PostgreSQL with pgvector enabled and applies
+Alembic migrations at startup. It runs the deterministic embedding and LLM
+providers so the public demo does not require paid model API calls. Bootstrap-admin
+mode is disabled in the hosted environment.
+
+The repository still supports the full local stack:
 
 - FastAPI API: `http://localhost:8000`
 - OpenAPI docs: `http://localhost:8000/docs`
 - Prometheus: `http://localhost:9090`
 - Grafana: `http://localhost:3000`
 
-Production deployment requires a managed PostgreSQL/pgvector instance, production-grade secret storage, provider credentials when external models are enabled, and an environment-specific container runtime.
+A production deployment would still require production-grade secret management,
+scaling, monitoring/alerting, backup policy, and provider credentials when external
+models are enabled.
 
 ### CI/CD and Docker
 
