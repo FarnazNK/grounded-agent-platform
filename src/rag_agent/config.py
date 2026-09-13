@@ -73,7 +73,7 @@ class Settings(BaseSettings):
     benchmark_output_dir: Path = Field(default=ProjectRoot / "benchmarks" / "results")
 
     @model_validator(mode="after")
-    def validate_runtime_configuration(self) -> "Settings":
+    def validate_runtime_configuration(self) -> Settings:
         if self.chunk_overlap_words >= self.chunk_size_words:
             raise ValueError("chunk_overlap_words must be smaller than chunk_size_words")
         if self.top_k_final > self.top_k_dense + self.top_k_sparse:

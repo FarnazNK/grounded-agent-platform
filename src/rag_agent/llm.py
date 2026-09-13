@@ -64,7 +64,8 @@ class LangChainLLMProvider:
             if settings.llm_provider == "anthropic":
                 from langchain_anthropic import ChatAnthropic
 
-                self._client = ChatAnthropic(
+                client_cls: Any = ChatAnthropic
+                self._client = client_cls(
                     model=settings.llm_model,
                     temperature=settings.llm_temperature,
                     timeout=settings.llm_request_timeout_seconds,
@@ -73,7 +74,8 @@ class LangChainLLMProvider:
             elif settings.llm_provider == "openai":
                 from langchain_openai import ChatOpenAI
 
-                self._client = ChatOpenAI(
+                client_cls = ChatOpenAI
+                self._client = client_cls(
                     model=settings.llm_model,
                     temperature=settings.llm_temperature,
                     timeout=settings.llm_request_timeout_seconds,

@@ -30,6 +30,7 @@ from rag_agent.api.schemas import (
     BootstrapRequest,
     DocumentResponse,
     DocumentsResponse,
+    DocumentView,
     ErrorResponse,
     IngestionJobResponse,
     LoginRequest,
@@ -187,7 +188,7 @@ def create_app(service: RAGService | None = None) -> FastAPI:
             INGESTION_FAILURES.labels(reason=exc.code.value).inc()
             raise
         INGESTION_JOBS.labels(operation="upload", status=job.status.value).inc()
-        return DocumentResponse(document=document, job=job)
+        return DocumentResponse(document=DocumentView.model_validate(document), job=job)
 
     @app.get("/v1/documents", response_model=DocumentsResponse)
     def list_documents(
@@ -196,7 +197,7 @@ def create_app(service: RAGService | None = None) -> FastAPI:
         svc: RAGService = Depends(get_service),
     ):
         documents = svc.list_documents(user_id=user.id, workspace_id=workspace_id)
-        return DocumentsResponse(documents=documents)
+        return DocumentsResponse(documents=[DocumentView.model_validate(doc) for doc in documents])
 
     @app.get("/v1/documents/{document_id}", response_model=DocumentResponse)
     def get_document(
@@ -210,7 +211,7 @@ def create_app(service: RAGService | None = None) -> FastAPI:
             workspace_id=workspace_id,
             document_id=document_id,
         )
-        return DocumentResponse(document=document)
+        return DocumentResponse(document=DocumentView.model_validate(document))
 
     @app.post("/v1/documents/{document_id}/reindex", response_model=DocumentResponse)
     def reindex_document(
@@ -225,7 +226,7 @@ def create_app(service: RAGService | None = None) -> FastAPI:
             document_id=document_id,
         )
         INGESTION_JOBS.labels(operation="reindex", status=job.status.value).inc()
-        return DocumentResponse(document=document, job=job)
+        return DocumentResponse(document=DocumentView.model_validate(document), job=job)
 
     @app.delete("/v1/documents/{document_id}", response_model=DocumentResponse)
     def delete_document(
@@ -240,7 +241,7 @@ def create_app(service: RAGService | None = None) -> FastAPI:
             document_id=document_id,
         )
         INGESTION_JOBS.labels(operation="delete", status=job.status.value).inc()
-        return DocumentResponse(document=document, job=job)
+        return DocumentResponse(document=DocumentView.model_validate(document), job=job)
 
     @app.get("/v1/ingestions/{job_id}", response_model=IngestionJobResponse)
     def get_ingestion_job(
@@ -281,6 +282,5 @@ def create_app(service: RAGService | None = None) -> FastAPI:
         TOKENS.labels(type="completion").inc(result.usage.completion_tokens)
         RETRIEVAL_GROUNDEDNESS.set(1.0 if result.grounded else 0.0)
         return QueryResponse(result=result)
-
 
     return app

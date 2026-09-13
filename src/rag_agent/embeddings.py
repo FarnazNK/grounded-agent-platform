@@ -4,7 +4,7 @@ import hashlib
 import re
 import time
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Any, Protocol
 
 from rag_agent.cache import TTLCache
 from rag_agent.config import Settings, get_settings
@@ -66,7 +66,8 @@ class OpenAIEmbeddingProvider:
                 "OpenAI embedding dependency is not installed. Install project provider "
                 "dependencies before enabling the OpenAI embedding provider."
             ) from exc
-        self._client = OpenAIEmbeddings(
+        client_cls: Any = OpenAIEmbeddings
+        self._client = client_cls(
             model=settings.embedding_model,
             dimensions=settings.embedding_dimensions,
             request_timeout=settings.embedding_request_timeout_seconds,

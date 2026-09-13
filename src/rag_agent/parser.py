@@ -3,9 +3,9 @@ from __future__ import annotations
 import hashlib
 import json
 import mimetypes
-from pathlib import Path
 from dataclasses import dataclass
 from io import BytesIO
+from pathlib import Path
 
 from pypdf import PdfReader
 

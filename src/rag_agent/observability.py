@@ -13,7 +13,7 @@ from typing import Any
 from rag_agent.config import get_settings
 
 _CONFIGURED = False
-_CONTEXT: ContextVar[dict[str, Any]] = ContextVar("rag_agent_log_context", default={})
+_CONTEXT: ContextVar[dict[str, Any] | None] = ContextVar("rag_agent_log_context", default=None)
 
 
 def configure_logging() -> None:
@@ -38,7 +38,7 @@ class StructuredLogger:
             "level": logging.getLevelName(level).lower(),
             "logger": self._logger.name,
             "event": event,
-            **_CONTEXT.get(),
+            **(_CONTEXT.get() or {}),
             **values,
         }
         self._logger.log(level, json.dumps(payload, default=str, sort_keys=True))
@@ -71,7 +71,7 @@ def get_logger(name: str) -> StructuredLogger:
 
 @contextmanager
 def request_context(**values: Any) -> Iterator[None]:
-    current = dict(_CONTEXT.get())
+    current = dict(_CONTEXT.get() or {})
     token = _CONTEXT.set({**current, **values})
     try:
         yield
