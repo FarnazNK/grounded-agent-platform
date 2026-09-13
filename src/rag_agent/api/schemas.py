@@ -1,62 +1,62 @@
-"""HTTP-facing schemas. Kept separate from the agent's internal schemas so
-internal refactors don't break API contracts."""
-
 from __future__ import annotations
-
-from typing import Literal
 
 from pydantic import BaseModel, Field
 
+from rag_agent.schemas import DocumentRecord, IngestionJobRecord, QueryResult, WorkspaceMembership
+
+
+class BootstrapRequest(BaseModel):
+    email: str
+    password: str = Field(..., min_length=8)
+    organization_slug: str
+    organization_name: str
+    workspace_slug: str
+    workspace_name: str
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str = Field(..., min_length=8)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = 'bearer'
+
 
 class QueryRequest(BaseModel):
-    """POST /query and /stream payload."""
-
+    workspace_id: str
     query: str = Field(..., min_length=1, max_length=2000)
-    # Reserved for future multi-turn support; not yet plumbed through.
-    session_id: str | None = None
-
-
-class ChunkOut(BaseModel):
-    """Retrieved chunk as exposed externally."""
-
-    source: str
-    score: float
-    snippet: str
-
-
-class GuardrailEventOut(BaseModel):
-    """A single guardrail decision, surfaced to clients for transparency."""
-
-    name: str
-    action: Literal["allow", "sanitize", "block"]
-    reason: str
 
 
 class QueryResponse(BaseModel):
-    """POST /query 200 body."""
-
-    answer: str
-    route: str | None = None
-    iterations: int
-    chunks: list[ChunkOut]
-    latency_ms: float
-    run_id: str
-    guardrails: list[GuardrailEventOut] = Field(default_factory=list)
-    sanitized_query: str | None = None
+    result: QueryResult
 
 
-class HealthResponse(BaseModel):
-    """GET /health body."""
+class DocumentResponse(BaseModel):
+    document: DocumentRecord
+    job: IngestionJobRecord | None = None
 
-    status: Literal["ok", "degraded"]
-    corpus_size: int
-    vector_count: int
-    tracing_enabled: bool
+
+class DocumentsResponse(BaseModel):
+    documents: list[DocumentRecord]
+
+
+class IngestionJobResponse(BaseModel):
+    job: IngestionJobRecord
+
+
+class MeResponse(BaseModel):
+    user_id: str
+    email: str
+
+
+class WorkspaceListResponse(BaseModel):
+    workspaces: list[WorkspaceMembership]
 
 
 class ErrorResponse(BaseModel):
-    """Standard error body — used for guardrail blocks and internal errors."""
-
     error: str
-    detail: str | None = None
-    guardrail: str | None = None
+    message: str
+    retryable: bool
+    details: dict = Field(default_factory=dict)

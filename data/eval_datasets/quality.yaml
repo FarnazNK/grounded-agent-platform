@@ -1,0 +1,16 @@
+name: core-rag-regression
+corpus_dir: data/sample_corpus_extended
+description: Deterministic evaluation dataset for tenant-scoped hybrid retrieval.
+cases:
+  - case_id: pto
+    query: What does the PTO policy say?
+    expected_sources: [pto_policy.md]
+    expected_contains: [PTO, policy]
+  - case_id: parental
+    query: How long is parental leave?
+    expected_sources: [parental_leave_policy.md]
+    expected_contains: [leave]
+  - case_id: password
+    query: What are the password rules?
+    expected_sources: [password_policy.md]
+    expected_contains: [password]
