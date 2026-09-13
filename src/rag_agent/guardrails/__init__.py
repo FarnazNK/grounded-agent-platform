@@ -25,10 +25,10 @@ from rag_agent.guardrails.output_filters import (
 )
 
 __all__ = [
+    "DataExfiltrationDetector",
     "Guardrail",
     "GuardrailDecision",
     "GuardrailViolation",
-    "DataExfiltrationDetector",
     "PIIDetector",
     "PIILeakDetector",
     "ProfanityFilter",
