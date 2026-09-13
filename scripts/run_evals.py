@@ -23,6 +23,9 @@ def main() -> int:
     if report.metrics["groundedness"] < settings.eval_groundedness_threshold:
         print("groundedness gate failed", file=sys.stderr)
         return 1
+    if report.metrics["answer_relevance"] < settings.eval_answer_relevance_threshold:
+        print("answer relevance gate failed", file=sys.stderr)
+        return 1
     if report.metrics["latency_p95_ms"] > settings.eval_p95_latency_ms_threshold:
         print("latency gate failed", file=sys.stderr)
         return 1

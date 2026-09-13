@@ -21,7 +21,13 @@ class HybridRetriever:
         sparse, sparse_latency = self._store.lexical_search(
             workspace_id, query, self._settings.top_k_sparse
         )
-        fused = reciprocal_rank_fusion([dense, sparse])
+        fused = reciprocal_rank_fusion(
+            [dense, sparse],
+            weights=[
+                self._settings.dense_retrieval_weight,
+                self._settings.sparse_retrieval_weight,
+            ],
+        )
         filtered = [chunk for chunk in fused if chunk.fused_score >= self._settings.min_fused_score]
         return filtered[: self._settings.top_k_final], {
             "dense_ms": dense_latency,
@@ -31,14 +37,21 @@ class HybridRetriever:
 
 
 def reciprocal_rank_fusion(
-    result_lists: list[list[RetrievedChunk]], k: int = 60
+    result_lists: list[list[RetrievedChunk]],
+    k: int = 60,
+    weights: list[float] | None = None,
 ) -> list[RetrievedChunk]:
+    if weights is None:
+        weights = [1.0] * len(result_lists)
+    if len(weights) != len(result_lists):
+        raise ValueError("weights must match the number of result lists")
     fused_scores: dict[str, float] = defaultdict(float)
     seen: dict[str, RetrievedChunk] = {}
     score_parts: dict[str, dict[str, float]] = defaultdict(dict)
-    for results in result_lists:
+    for list_index, results in enumerate(result_lists):
+        weight = weights[list_index]
         for rank, chunk in enumerate(results):
-            fused_scores[chunk.chunk_id] += 1.0 / (k + rank + 1)
+            fused_scores[chunk.chunk_id] += weight / (k + rank + 1)
             seen.setdefault(chunk.chunk_id, chunk)
             if chunk.vector_score is not None:
                 score_parts[chunk.chunk_id]["vector_score"] = chunk.vector_score

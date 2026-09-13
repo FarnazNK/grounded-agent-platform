@@ -14,6 +14,7 @@ from rag_agent.guardrails.base import (
     apply_guardrails,
 )
 from rag_agent.guardrails.input_filters import (
+    DataExfiltrationDetector,
     PIIDetector,
     ProfanityFilter,
     PromptInjectionDetector,
@@ -27,6 +28,7 @@ __all__ = [
     "Guardrail",
     "GuardrailDecision",
     "GuardrailViolation",
+    "DataExfiltrationDetector",
     "PIIDetector",
     "PIILeakDetector",
     "ProfanityFilter",

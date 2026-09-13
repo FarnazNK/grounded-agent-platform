@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import mimetypes
+from pathlib import Path
 from dataclasses import dataclass
 from io import BytesIO
 
@@ -65,10 +66,16 @@ def parse_document_bytes(
         )
     media_type = detect_media_type(filename, claimed_type, data, settings)
     if media_type == "application/pdf":
-        reader = PdfReader(BytesIO(data))
-        text = "\n".join((page.extract_text() or "").strip() for page in reader.pages).strip()
+        try:
+            reader = PdfReader(BytesIO(data))
+            text = "\n".join((page.extract_text() or "").strip() for page in reader.pages).strip()
+        except Exception as exc:
+            raise InvalidUploadError("Uploaded PDF could not be parsed.") from exc
     elif media_type == "application/json":
-        parsed = json.loads(data.decode("utf-8"))
+        try:
+            parsed = json.loads(data.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise InvalidUploadError("Uploaded JSON is not valid UTF-8 JSON.") from exc
         text = json.dumps(parsed, indent=2, sort_keys=True)
     else:
         try:
@@ -80,7 +87,7 @@ def parse_document_bytes(
     if not text:
         raise InvalidUploadError("Uploaded document did not contain extractable text.")
     return ParsedDocument(
-        source_name=filename,
+        source_name=Path(filename).name or "upload",
         media_type=media_type,
         file_size=len(data),
         sha256=hashlib.sha256(data).hexdigest(),

@@ -1,4 +1,4 @@
-.PHONY: install dev lint typecheck test test-unit test-integration eval eval-ci security docker-build docker-up docker-down migrate benchmark smoke clean
+.PHONY: install dev lint typecheck test test-unit test-integration eval eval-adversarial eval-ci security docker-build docker-up docker-down migrate benchmark smoke clean
 
 install:
 	pip install -e .
@@ -23,7 +23,10 @@ test-integration:
 eval:
 	python scripts/run_evals.py --dataset data/eval_datasets/quality.yaml --out benchmarks/results/eval_report.json
 
-eval-ci: eval
+eval-adversarial:
+	python scripts/run_evals.py --dataset data/eval_datasets/adversarial.yaml --out benchmarks/results/adversarial_eval_report.json
+
+eval-ci: eval eval-adversarial
 
 security:
 	pip-audit

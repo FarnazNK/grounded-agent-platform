@@ -1,5 +1,5 @@
 import http from 'k6/http';
-import { check, sleep } from 'k6';
+import { check, fail, sleep } from 'k6';
 
 export const options = {
   vus: 10,
@@ -14,12 +14,18 @@ const BASE_URL = __ENV.BASE_URL || 'http://localhost:8000';
 const TOKEN = __ENV.ACCESS_TOKEN || '';
 const WORKSPACE_ID = __ENV.WORKSPACE_ID || '';
 
+export function setup() {
+  if (!TOKEN || !WORKSPACE_ID) {
+    fail('ACCESS_TOKEN and WORKSPACE_ID are required for the authenticated query scenario');
+  }
+}
+
 export default function () {
   const payload = JSON.stringify({ workspace_id: WORKSPACE_ID, query: 'What is the PTO policy?' });
   const params = {
     headers: {
       'Content-Type': 'application/json',
-      Authorization: 'B' + 'earer ' + TOKEN,
+      Authorization: `Bearer ${TOKEN}`,
     },
   };
   const res = http.post(`${BASE_URL}/v1/query`, payload, params);

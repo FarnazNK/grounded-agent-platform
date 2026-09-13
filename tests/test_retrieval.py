@@ -29,3 +29,10 @@ def test_rrf_boosts_overlap():
     assert fused[0].chunk_id == "a"
     assert fused[0].vector_score == 0.9
     assert fused[0].lexical_score == 0.7
+
+
+def test_weighted_rrf_can_prefer_lexical_signal():
+    dense = [chunk("dense", "dense.md", vector_score=0.9)]
+    lexical = [chunk("lexical", "lexical.md", lexical_score=2.0)]
+    fused = reciprocal_rank_fusion([dense, lexical], weights=[0.8, 1.2])
+    assert fused[0].chunk_id == "lexical"

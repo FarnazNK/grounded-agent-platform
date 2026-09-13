@@ -4,6 +4,7 @@
 - The default deployment uses synchronous provider calls; high-throughput production should move LLM and embedding calls to async-native SDKs or worker pools.
 - The built-in rate limiter is process-local; multi-instance production should externalize it.
 - Large binary formats beyond PDF are deliberately out of scope.
+- The pgvector schema currently uses 256-dimensional embeddings; changing dimensions requires a migration and full re-index.
 
 ## 10x plan
 - Move rate limiting and request dedupe to Redis.
@@ -17,5 +18,5 @@
 
 ## Non-goals
 - Multi-modal generation.
-- Voice, image, or autonomous-agent features.
+- Multi-modal or autonomous-agent features.
 - Unsupported security claims without measured controls.

@@ -78,6 +78,8 @@ def build_eval_service(dataset: EvalDataset, settings: Settings) -> tuple[RAGSer
 def run_evaluation(dataset_path: Path | str, settings: Settings) -> EvaluationReport:
     dataset = load_dataset(dataset_path)
     service, user_id, workspace_id = build_eval_service(dataset, settings)
+    if not dataset.cases:
+        raise ValueError("evaluation dataset must contain at least one case")
     cases: list[CaseReport] = []
     for case in dataset.cases:
         result = service.query(
@@ -114,4 +116,6 @@ def run_evaluation(dataset_path: Path | str, settings: Settings) -> EvaluationRe
 
 
 def write_report(report: EvaluationReport, out_path: Path | str) -> None:
-    Path(out_path).write_text(report.to_json(), encoding="utf-8")
+    path = Path(out_path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(report.to_json(), encoding="utf-8")

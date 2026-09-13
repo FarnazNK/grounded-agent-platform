@@ -26,7 +26,7 @@ class SeededApp:
 def build_seeded_service() -> SeededApp:
     settings = Settings(
         app_env="test",
-        jwt_secret="test-secret",
+        jwt_secret="test-secret-test-secret-test-secret-123",
         llm_provider="deterministic",
         embedding_provider="deterministic",
         enable_bootstrap_admin=True,
@@ -87,5 +87,5 @@ def client(seeded_app: SeededApp):
         yield test_client
 
 
-def auth_header(user_id: str) -> dict[str, str]:
-    return {"Authorization": "B" + "earer " + create_access_token(user_id)}
+def auth_header(user_id: str, settings: Settings | None = None) -> dict[str, str]:
+    return {"Authorization": "Bearer " + create_access_token(user_id, settings)}

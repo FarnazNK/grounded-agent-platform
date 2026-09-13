@@ -141,7 +141,7 @@ class DocumentChunk(Base, TimestampMixin):
     chunk_index: Mapped[int] = mapped_column(Integer, nullable=False)
     content: Mapped[str] = mapped_column(Text, nullable=False)
     token_count: Mapped[int] = mapped_column(Integer, nullable=False)
-    embedding: Mapped[list[float]] = mapped_column(Vector(16), nullable=False)
+    embedding: Mapped[list[float]] = mapped_column(Vector(256), nullable=False)
     embedding_model: Mapped[str] = mapped_column(String(128), nullable=False)
     chunk_metadata: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, default=dict)
 

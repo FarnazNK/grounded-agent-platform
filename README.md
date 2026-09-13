@@ -62,22 +62,37 @@ See `docs/architecture.md`.
 ## 9) Benchmarks
 - k6 suite: `benchmarks/k6/query.js`
 - CI benchmark: `python benchmarks/load/run_benchmark.py --assert-p95-ms 500`
-- Committed results: `benchmarks/load/results/local-benchmark.md`
+- CI uploads benchmark/evaluation reports as artifacts for each run
 
 ## 10) Design decisions
-See `docs/adr/` for hybrid retrieval, pgvector, FastAPI, SSE, chunking, reranking, and retry boundaries.
+See `docs/adr/` for hybrid retrieval, pgvector, FastAPI, chunking, rank fusion, and retry boundaries.
 
 ## 11) Limitations
 See `docs/limitations.md` for current limits, 10x/100x evolution plans, and non-goals.
 
 ## Quick start
+
+macOS/Linux:
 ```bash
+python -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev,tracing]'
 cp .env.example .env
 docker compose up -d postgres
-make dev
-make migrate
+alembic upgrade head
 rag-agent bootstrap-demo
 uvicorn rag_agent.api:create_app --factory --reload
+```
+
+Windows PowerShell:
+```powershell
+py -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -e ".[dev,tracing]"
+Copy-Item .env.example .env
+docker compose up -d postgres
+.\.venv\Scripts\alembic.exe upgrade head
+.\.venv\Scripts\rag-agent.exe bootstrap-demo
+.\.venv\Scripts\uvicorn.exe rag_agent.api:create_app --factory --reload
 ```
 
 ## API surface
@@ -88,10 +103,6 @@ uvicorn rag_agent.api:create_app --factory --reload
 - `POST /v1/documents/{id}/reindex`
 - `DELETE /v1/documents/{id}`
 - `POST /v1/query`
-- `POST /v1/stream`
 - `GET /health/live`
 - `GET /health/ready`
 - `GET /metrics`
-
-## Migration notes
-Voice features and Chroma storage were removed. See `docs/migration-notes.md`.

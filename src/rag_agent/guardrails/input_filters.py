@@ -105,6 +105,11 @@ _INJECTION_PATTERNS: list[re.Pattern[str]] = [
         re.I,
     ),
     re.compile(r"<\|im_start\|>|<\|im_end\|>|\[INST\]|\[/INST\]"),  # chat template injection
+    re.compile(
+        r"\b(ignore|disregard|override)\b.{0,20}\b(all|the)\b.{0,20}"
+        r"\b(rules|instructions|guardrails)\b",
+        re.I,
+    ),
 ]
 
 
@@ -175,4 +180,40 @@ class ProfanityFilter:
             f"abusive language redacted: {hits}",
             sanitized_text=sanitized,
             metadata={"hits": hits},
+        )
+
+
+_EXFILTRATION_PATTERNS: list[re.Pattern[str]] = [
+    re.compile(
+        r"\b(extract|dump|list|show|return|reveal|give me)\b.{0,40}"
+        r"\b(all|every)\b.{0,40}"
+        r"\b(email|emails|phone|phones|ssn|ssns|password|passwords|credential|credentials|"
+        r"secret|secrets)\b",
+        re.I,
+    ),
+    re.compile(
+        r"\b(show|reveal|retrieve|access)\b.{0,40}\b(another|other)\b.{0,20}\btenant(?:'s|s)?\b",
+        re.I,
+    ),
+]
+
+
+@dataclass
+class DataExfiltrationDetector:
+    """Blocks explicit requests to bulk-extract secrets/PII or another tenant's data."""
+
+    name: str = "data_exfiltration_detector"
+
+    def __call__(self, text: str) -> GuardrailDecision:
+        for pattern in _EXFILTRATION_PATTERNS:
+            match = pattern.search(text)
+            if match:
+                return GuardrailDecision(
+                    self.name,
+                    GuardrailAction.BLOCK,
+                    f"sensitive data exfiltration pattern matched: {match.group(0)[:80]!r}",
+                    metadata={"pattern": pattern.pattern},
+                )
+        return GuardrailDecision(
+            self.name, GuardrailAction.ALLOW, "no exfiltration intent detected"
         )

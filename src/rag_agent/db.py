@@ -22,6 +22,8 @@ def init_engine(database_url: str | None = None) -> Engine:
     if _engine is not None and database_url is None:
         return _engine
     settings = get_settings()
+    if _engine is not None:
+        _engine.dispose()
     _engine = create_engine(database_url or settings.database_url, pool_pre_ping=True, future=True)
     _session_local = sessionmaker(bind=_engine, expire_on_commit=False, autoflush=False)
     return _engine
