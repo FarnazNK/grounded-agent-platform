@@ -12,7 +12,7 @@ app = typer.Typer(add_completion=False, no_args_is_help=True)
 @app.command()
 def bootstrap_demo(
     email: str = typer.Option("admin@example.com"),
-    password: str = typer.Option("changeme123"),
+    password: str = typer.Option(..., prompt=True, hide_input=True, confirmation_prompt=True),
     organization_slug: str = typer.Option("demo-org"),
     organization_name: str = typer.Option("Demo Org"),
     workspace_slug: str = typer.Option("default"),
