@@ -281,3 +281,45 @@ def create_app(service: RAGService | None = None) -> FastAPI:
         )
         INGESTION_JOBS.labels(operation="delete", status=job.status.value).inc()
         return DocumentResponse(document=DocumentView.model_validate(document), job=job)
+
+    @app.get("/v1/ingestions/{job_id}", response_model=IngestionJobResponse)
+    def get_ingestion_job(
+        job_id: str,
+        workspace_id: str,
+        user=Depends(current_user),
+        svc: RAGService = Depends(get_service),
+    ):
+        job = svc.get_ingestion_job(
+            user_id=user.id,
+            workspace_id=workspace_id,
+            job_id=job_id,
+        )
+        return IngestionJobResponse(job=job)
+
+    @app.post("/v1/query", response_model=QueryResponse)
+    def query(
+        req: QueryRequest,
+        request: Request,
+        user=Depends(current_user),
+        svc: RAGService = Depends(get_service),
+    ):
+        request_id = request.headers.get("x-request-id") or str(uuid4())
+        result = svc.query(
+            user_id=user.id,
+            workspace_id=req.workspace_id,
+            query=req.query,
+            request_id=request_id,
+        )
+        if result.cached:
+            CACHE_HITS.labels(cache="retrieval").inc()
+        else:
+            CACHE_MISSES.labels(cache="retrieval").inc()
+        RETRIEVAL_LATENCY.observe(result.latency.retrieval_ms / 1000)
+        LLM_LATENCY.observe(result.latency.llm_ms / 1000)
+        DB_LATENCY.observe(result.latency.db_ms / 1000)
+        TOKENS.labels(type="prompt").inc(result.usage.prompt_tokens)
+        TOKENS.labels(type="completion").inc(result.usage.completion_tokens)
+        RETRIEVAL_GROUNDEDNESS.set(1.0 if result.grounded else 0.0)
+        return QueryResponse(result=result)
+
+    return app
