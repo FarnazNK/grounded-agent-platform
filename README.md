@@ -13,6 +13,8 @@
 ![Security](https://img.shields.io/badge/security-pip--audit%20%2B%20guardrails-0B6E4F)
 ![Auth](https://img.shields.io/badge/auth-JWT-000000?logo=jsonwebtokens&logoColor=white)
 
+**Live:** [API / Docs](https://rag-agent-api-2uau.onrender.com/) · [Swagger](https://rag-agent-api-2uau.onrender.com/docs) · [Health](https://rag-agent-api-2uau.onrender.com/health/live)
+
 RAG Agent is a multi-tenant retrieval-augmented generation API for document ingestion, hybrid retrieval, grounded answers, evaluation, and operational reliability. It combines FastAPI with PostgreSQL/pgvector, lexical search, weighted reciprocal-rank fusion, authentication, guardrails, observability, and reproducible quality gates.
 
 > **Status:** A public portfolio API is live on Render with managed Neon PostgreSQL/pgvector and deterministic providers. The repository also includes a complete local Docker Compose stack, JWT authentication, workspace-scoped retrieval, Prometheus/Grafana monitoring, Terraform infrastructure, evaluation datasets, and GitHub Actions CI. The hosted instance is a demo deployment rather than a production SLA.
