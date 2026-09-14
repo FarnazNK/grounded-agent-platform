@@ -122,6 +122,10 @@ def create_app(service: RAGService | None = None) -> FastAPI:
     def ready() -> dict[str, object]:
         if service is None:
             ping_database()
+        if app.state.settings.app_env == "production":
+            app.state.store.corpus_counts()
+            return {"status": "ok"}
+
         docs, chunks = app.state.store.corpus_counts()
         return {
             "status": "ok",
@@ -131,7 +135,15 @@ def create_app(service: RAGService | None = None) -> FastAPI:
         }
 
     @app.get("/metrics")
-    def metrics() -> Response:
+    def metrics(
+        credentials: HTTPAuthorizationCredentials | None = Depends(security),
+        svc: RAGService = Depends(get_service),
+    ) -> Response:
+        if app.state.settings.app_env == "production":
+            if credentials is None:
+                raise AuthenticationRequiredError()
+            payload = decode_access_token(credentials.credentials, app.state.settings)
+            svc.get_user(payload["sub"])
         return Response(content=render_metrics(), media_type="text/plain; version=0.0.4")
 
     @app.post(
