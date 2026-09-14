@@ -40,6 +40,7 @@ RAG Agent is a multi-tenant retrieval-augmented generation API for document inge
 - GitHub Actions CI for linting, formatting, mypy, migrations, tests, evaluations, security scanning, and Docker builds
 - Docker Compose stack for API, PostgreSQL/pgvector, Prometheus, and Grafana
 - Terraform configuration for environment-specific infrastructure
+- AWS Lambda/SAM deployment path with GitHub OIDC, Function URLs, CloudWatch logging, and cost caps
 - Alembic database migrations
 
 ## Architecture
@@ -219,3 +220,7 @@ See [`docs/deployment.md`](docs/deployment.md) for the intended release flow and
 - **API:** Python 3.11+, FastAPI, Pydantic v2
 - **Database:** PostgreSQL 16, SQLAlchemy, psycopg
 - **Vector search:** pgvector
+
+## AWS deployment
+
+This repository includes an AWS Lambda/SAM deployment path under [`infra/aws/`](./infra/aws/README.md). It uses GitHub OIDC rather than long-lived AWS access keys, exposes the FastAPI backend through a Lambda Function URL, sends logs to CloudWatch, and applies low-cost portfolio defaults. AWS is prepared but is not claimed as live until an AWS account/role is connected and the deployment workflow succeeds.
