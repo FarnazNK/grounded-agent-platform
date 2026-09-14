@@ -1,0 +1,48 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: RAG Agent portfolio API on AWS Lambda
+
+Parameters:
+  DatabaseUrl:
+    Type: String
+    NoEcho: true
+  JwtSecret:
+    Type: String
+    NoEcho: true
+
+Resources:
+  RagAgentApi:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: makefile
+    Properties:
+      CodeUri: ../../
+      Handler: rag_agent.lambda_handler.handler
+      Runtime: python3.12
+      Architectures: [x86_64]
+      MemorySize: 1024
+      Timeout: 30
+      ReservedConcurrentExecutions: 2
+      Environment:
+        Variables:
+          APP_ENV: production
+          APP_DATABASE_URL: !Ref DatabaseUrl
+          APP_JWT_SECRET: !Ref JwtSecret
+          APP_ENABLE_BOOTSTRAP_ADMIN: 'false'
+          APP_LLM_PROVIDER: deterministic
+          APP_EMBEDDING_PROVIDER: deterministic
+      FunctionUrlConfig:
+        AuthType: NONE
+      Policies:
+        - AWSLambdaBasicExecutionRole
+
+  RagAgentLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${RagAgentApi}
+      RetentionInDays: 7
+
+Outputs:
+  ApiUrl:
+    Description: RAG Agent Lambda Function URL
+    Value: !GetAtt RagAgentApiUrl.FunctionUrl
