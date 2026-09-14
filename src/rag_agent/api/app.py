@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from functools import partial
 from uuid import uuid4
@@ -48,6 +49,20 @@ from rag_agent.observability import maybe_enable_langsmith, request_context
 from rag_agent.service import RAGService
 
 security = HTTPBearer(auto_error=False)
+_auth_windows: dict[str, deque[float]] = defaultdict(deque)
+
+
+def _enforce_auth_rate_limit(request: Request, limit: int) -> None:
+    now = time.monotonic()
+    key = request.client.host if request.client else "unknown"
+    events = _auth_windows[key]
+    while events and now - events[0] >= 60:
+        events.popleft()
+    if len(events) >= limit:
+        from rag_agent.errors import RateLimitExceededError
+
+        raise RateLimitExceededError("Authentication rate limit exceeded.")
+    events.append(now)
 
 
 @asynccontextmanager
@@ -160,7 +175,15 @@ def create_app(service: RAGService | None = None) -> FastAPI:
         response_model=TokenResponse,
         responses={401: {"model": ErrorResponse}},
     )
-    def login(req: LoginRequest, svc: RAGService = Depends(get_service)):
+    def login(
+        req: LoginRequest,
+        request: Request,
+        svc: RAGService = Depends(get_service),
+    ):
+        _enforce_auth_rate_limit(
+            request,
+            app.state.settings.auth_rate_limit_requests_per_minute,
+        )
         auth = svc.authenticate(req.email, req.password)
         return TokenResponse(access_token=auth.access_token)
 
@@ -258,45 +281,3 @@ def create_app(service: RAGService | None = None) -> FastAPI:
         )
         INGESTION_JOBS.labels(operation="delete", status=job.status.value).inc()
         return DocumentResponse(document=DocumentView.model_validate(document), job=job)
-
-    @app.get("/v1/ingestions/{job_id}", response_model=IngestionJobResponse)
-    def get_ingestion_job(
-        job_id: str,
-        workspace_id: str,
-        user=Depends(current_user),
-        svc: RAGService = Depends(get_service),
-    ):
-        job = svc.get_ingestion_job(
-            user_id=user.id,
-            workspace_id=workspace_id,
-            job_id=job_id,
-        )
-        return IngestionJobResponse(job=job)
-
-    @app.post("/v1/query", response_model=QueryResponse)
-    def query(
-        req: QueryRequest,
-        request: Request,
-        user=Depends(current_user),
-        svc: RAGService = Depends(get_service),
-    ):
-        request_id = request.headers.get("x-request-id") or str(uuid4())
-        result = svc.query(
-            user_id=user.id,
-            workspace_id=req.workspace_id,
-            query=req.query,
-            request_id=request_id,
-        )
-        if result.cached:
-            CACHE_HITS.labels(cache="retrieval").inc()
-        else:
-            CACHE_MISSES.labels(cache="retrieval").inc()
-        RETRIEVAL_LATENCY.observe(result.latency.retrieval_ms / 1000)
-        LLM_LATENCY.observe(result.latency.llm_ms / 1000)
-        DB_LATENCY.observe(result.latency.db_ms / 1000)
-        TOKENS.labels(type="prompt").inc(result.usage.prompt_tokens)
-        TOKENS.labels(type="completion").inc(result.usage.completion_tokens)
-        RETRIEVAL_GROUNDEDNESS.set(1.0 if result.grounded else 0.0)
-        return QueryResponse(result=result)
-
-    return app
