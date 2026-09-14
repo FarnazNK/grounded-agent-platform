@@ -7,7 +7,7 @@ from functools import partial
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, Request, Response, UploadFile
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.concurrency import run_in_threadpool
 
@@ -126,8 +126,14 @@ def create_app(service: RAGService | None = None) -> FastAPI:
         return svc.get_user(payload["sub"])
 
     @app.get("/", include_in_schema=False)
-    def root() -> RedirectResponse:
-        return RedirectResponse(url="/docs", status_code=307)
+    def root() -> dict[str, str]:
+        return {
+            "name": "RAG Agent API",
+            "status": "online",
+            "docs": "/docs",
+            "liveness": "/health/live",
+            "readiness": "/health/ready",
+        }
 
     @app.get("/health/live")
     def live() -> dict[str, str]:
