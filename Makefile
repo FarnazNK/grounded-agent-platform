@@ -1,4 +1,4 @@
-.PHONY: install dev lint typecheck test test-unit test-integration eval eval-adversarial eval-ci security docker-build docker-up docker-down migrate benchmark smoke clean
+.PHONY: install dev lint typecheck test test-unit test-integration eval eval-adversarial eval-ci security docker-build docker-up docker-down migrate benchmark smoke clean build-RagAgentApi
 
 install:
 	pip install -e .
@@ -51,3 +51,6 @@ docker-down:
 
 clean:
 	rm -rf .pytest_cache .ruff_cache .mypy_cache build dist *.egg-info coverage.xml .coverage htmlcov
+
+build-RagAgentApi:
+	pip install . --target "$(ARTIFACTS_DIR)"
