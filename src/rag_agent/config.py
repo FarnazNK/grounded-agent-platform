@@ -58,6 +58,7 @@ class Settings(BaseSettings):
 
     request_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
     rate_limit_requests_per_minute: int = Field(default=60, ge=1, le=100_000)
+    auth_rate_limit_requests_per_minute: int = Field(default=10, ge=1, le=1_000)
     retrieval_cache_ttl_seconds: int = Field(default=120, ge=0, le=86_400)
     embedding_cache_ttl_seconds: int = Field(default=3600, ge=0, le=604_800)
 
