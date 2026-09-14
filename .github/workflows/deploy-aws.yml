@@ -1,0 +1,57 @@
+name: Deploy backend to AWS Lambda
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "pyproject.toml"
+      - "Makefile"
+      - "infra/aws/**"
+      - ".github/workflows/deploy-aws.yml"
+
+permissions:
+  contents: read
+  id-token: write
+
+concurrency:
+  group: aws-rag-agent
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: aws
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: aws-actions/setup-sam@v2
+
+      - uses: aws-actions/configure-aws-credentials@v5
+        with:
+          role-to-assume: ${{ vars.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION || 'us-east-1' }}
+
+      - name: Build
+        run: sam build --template-file infra/aws/template.yaml --use-container
+
+      - name: Deploy
+        run: |
+          sam deploy \
+            --template-file .aws-sam/build/template.yaml \
+            --stack-name rag-agent-portfolio-api \
+            --resolve-s3 \
+            --capabilities CAPABILITY_IAM \
+            --no-confirm-changeset \
+            --no-fail-on-empty-changeset \
+            --parameter-overrides \
+              DatabaseUrl="${{ secrets.AWS_DATABASE_URL }}" \
+              JwtSecret="${{ secrets.AWS_JWT_SECRET }}"
+
+      - name: Print public URL
+        run: |
+          aws cloudformation describe-stacks \
+            --stack-name rag-agent-portfolio-api \
+            --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" \
+            --output text
