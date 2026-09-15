@@ -41,6 +41,15 @@ def test_context_builder_excludes_sensitive_files(tmp_path):
         "API_SECRET=do-not-read",
         encoding="utf-8",
     )
+    (tmp_path / "credentials.json").write_text(
+        '{"token": "do-not-read"}',
+        encoding="utf-8",
+    )
+    (tmp_path / "master.key").write_text("do-not-read", encoding="utf-8")
+    (tmp_path / "production.tfvars").write_text(
+        'db_password = "do-not-read"',
+        encoding="utf-8",
+    )
 
     builder = RepositoryContextBuilder(tmp_path)
     context = builder.build("api client secret credential", limit=10)
@@ -49,3 +58,6 @@ def test_context_builder_excludes_sensitive_files(tmp_path):
     assert "service.py" in selected
     assert "secrets.yaml" not in selected
     assert ".env.local" not in selected
+    assert "credentials.json" not in selected
+    assert "master.key" not in selected
+    assert "production.tfvars" not in selected
