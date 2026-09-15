@@ -165,9 +165,9 @@ class RepositoryContextBuilder:
                 continue
             if lowered_parts & DEFAULT_SENSITIVE_PARTS:
                 continue
-            if path.name.lower().startswith((".env", "secret")):
+            if path.name.lower().startswith((".env", "secret", "credential")):
                 continue
-            is_supported = (
+            if path.name.lower() == "master.key" or path.name.lower().endswith((".tfvars", ".tfvars.json")):\n                continue\n            is_supported = (
                 path.name in _ALWAYS_TEXT_FILENAMES or path.suffix.lower() in DEFAULT_TEXT_SUFFIXES
             )
             if not is_supported:
