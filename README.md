@@ -46,7 +46,7 @@ The design focuses on the parts that make AI systems useful beyond a demo: **con
 - Bounded overlapping chunking
 - Deterministic local embedding and LLM providers for reproducible CI
 - Optional Anthropic and OpenAI adapters
-- Prompt-injection checks on input and retrieved context
+- Deterministic regex-based prompt-injection screening on input and retrieved context; useful as a first-pass filter, but intentionally treated as bypassable and not a security boundary
 - PII/output guardrails and citation validation
 - Retrieval and embedding caches with index-version invalidation
 - Structured JSON logging and request correlation IDs
@@ -322,7 +322,7 @@ A production deployment would still need organization-specific secret management
 - pgvector
 - Anthropic and OpenAI model adapters
 - deterministic providers for reproducible CI
-- prompt/context/output guardrails
+- deterministic first-pass prompt/context screening plus output/citation validation
 - RAG and developer-agent evaluations
 
 **Backend**
@@ -378,6 +378,7 @@ tests/                        unit and integration coverage
 
 - **Context is a system component.** Measure what the model sees instead of treating prompt assembly as incidental.
 - **Models propose; policy decides.** Tool access is enforced outside the LLM.
+- **Guardrails are layered, not magical.** Regex-based prompt-injection checks are deterministic and testable, but bypassable; authorization, tool policy, sandboxing, and output validation carry the real security boundary.
 - **Verification is part of the workflow.** A code change is not complete merely because text was generated.
 - **AI quality needs evals.** Deterministic gates catch regressions before deployment.
 - **Observability applies to agent behavior too.** Decisions, tools, failures, and outcomes should be inspectable.
