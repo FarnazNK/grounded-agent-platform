@@ -1,0 +1,14 @@
+name: debug
+description: Diagnose a failure before proposing or applying a fix.
+instructions: |
+  Reproduce or inspect the reported failure first.
+  Trace the failure to the smallest relevant code path.
+  Read tests and callers before changing implementation.
+  Prefer a root-cause fix over suppressing symptoms.
+  Re-run the failing check after any write.
+allowed_tools:
+  - list_files
+  - read_file
+  - search_code
+  - write_file
+  - run_check

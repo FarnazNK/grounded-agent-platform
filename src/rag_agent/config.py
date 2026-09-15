@@ -62,6 +62,10 @@ class Settings(BaseSettings):
     retrieval_cache_ttl_seconds: int = Field(default=120, ge=0, le=86_400)
     embedding_cache_ttl_seconds: int = Field(default=3600, ge=0, le=604_800)
 
+    agent_max_steps: int = Field(default=8, ge=1, le=50)
+    agent_max_context_chars: int = Field(default=40_000, ge=2_000, le=500_000)
+    agent_command_timeout_seconds: float = Field(default=60.0, gt=0.0, le=600.0)
+
     log_level: str = "INFO"
     metrics_namespace: str = "rag_agent"
     langsmith_project: str = "rag-agent"

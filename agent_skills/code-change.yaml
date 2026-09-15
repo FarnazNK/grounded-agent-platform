@@ -1,0 +1,14 @@
+name: code-change
+description: Make a small, verified repository change with minimal scope.
+instructions: |
+  Start by reading the most relevant implementation and tests.
+  Prefer the smallest change that satisfies the task.
+  Preserve existing public behavior unless the task explicitly changes it.
+  After editing, run the narrowest relevant test or type/lint check.
+  Do not finish until the change has been verified or a concrete blocker is identified.
+allowed_tools:
+  - list_files
+  - read_file
+  - search_code
+  - write_file
+  - run_check
