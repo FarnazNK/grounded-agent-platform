@@ -1,0 +1,20 @@
+cases:
+  - task: "Find where JWT authentication access tokens are decoded and enforced"
+    expected_files:
+      - src/rag_agent/auth.py
+      - src/rag_agent/api/app.py
+
+  - task: "Find the prompt injection guardrail and input filtering implementation"
+    expected_files:
+      - src/rag_agent/guardrails/input_filters.py
+      - src/rag_agent/service.py
+
+  - task: "Find Prometheus request metrics and latency instrumentation"
+    expected_files:
+      - src/rag_agent/api/metrics.py
+      - src/rag_agent/api/app.py
+
+  - task: "Find the evaluation thresholds and quality gate configuration"
+    expected_files:
+      - src/rag_agent/config.py
+      - src/rag_agent/evals/runner.py

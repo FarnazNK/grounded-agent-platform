@@ -1,7 +1,7 @@
 [project]
 name = "rag-agent"
-version = "1.0.0"
-description = "Measured multi-tenant RAG API with PostgreSQL/pgvector, ingestion, evaluation, and operational controls."
+version = "1.1.0"
+description = "Production-oriented RAG API and policy-controlled developer-agent harness with evaluation and observability."
 requires-python = ">=3.11"
 authors = [{ name = "Farnaz Nasehi" }]
 readme = "README.md"
