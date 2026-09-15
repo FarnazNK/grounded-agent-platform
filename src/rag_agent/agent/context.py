@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 
 from rag_agent.agent.models import ContextFile
+from rag_agent.agent.policy import is_sensitive_path
 
 _RAW_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 _CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
@@ -29,16 +30,6 @@ DEFAULT_IGNORED_DIRS = frozenset(
 DEFAULT_IGNORED_PATH_PREFIXES = (
     "benchmarks/results/",
     "data/agent_evals/",
-)
-
-DEFAULT_SENSITIVE_PARTS = frozenset(
-    {
-        ".aws",
-        ".gnupg",
-        ".ssh",
-        "credentials",
-        "secrets",
-    }
 )
 
 DEFAULT_TEXT_SUFFIXES = frozenset(
@@ -158,16 +149,13 @@ class RepositoryContextBuilder:
                 continue
             relative = path.relative_to(self.repo_root)
             relative_posix = relative.as_posix()
-            lowered_parts = {part.lower() for part in relative.parts}
             if any(part in self.ignored_dirs for part in relative.parts):
                 continue
             if any(relative_posix.startswith(prefix) for prefix in DEFAULT_IGNORED_PATH_PREFIXES):
                 continue
-            if lowered_parts & DEFAULT_SENSITIVE_PARTS:
+            if is_sensitive_path(relative):
                 continue
-            if path.name.lower().startswith((".env", "secret", "credential")):
-                continue
-            if path.name.lower() == "master.key" or path.name.lower().endswith((".tfvars", ".tfvars.json")):\n                continue\n            is_supported = (
+            is_supported = (
                 path.name in _ALWAYS_TEXT_FILENAMES or path.suffix.lower() in DEFAULT_TEXT_SUFFIXES
             )
             if not is_supported:

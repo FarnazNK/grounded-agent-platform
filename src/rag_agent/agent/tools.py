@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-import shlex
 import subprocess
 from collections.abc import Callable
 from pathlib import Path
@@ -71,11 +70,6 @@ class RepositoryToolbox:
     def read_file(self, arguments: dict[str, Any]) -> ToolResult:
         relative_path = str(arguments.get("path", ""))
         try:
-            name = Path(relative_path).name.lower()
-            if name.startswith(("secret", "credential")):
-                raise PolicyViolation("Access to sensitive repository paths is blocked.")
-            if name == "master.key" or name.endswith((".tfvars", ".tfvars.json")):
-                raise PolicyViolation("Access to sensitive repository paths is blocked.")
             path = self.policy.validate_path(self.repo_root, relative_path)
             if not path.is_file():
                 return ToolResult(
@@ -165,29 +159,7 @@ class RepositoryToolbox:
     def run_check(self, arguments: dict[str, Any]) -> ToolResult:
         command = str(arguments.get("command", ""))
         try:
-            parsed = shlex.split(command)
-            blocked_flags = {
-                "--basetemp",
-                "--cache-dir",
-                "--fix",
-                "--fix-only",
-                "--junit-xml",
-                "--junitxml",
-                "--output-file",
-                "-o",
-                "-p",
-            }
-            if any(
-                arg in blocked_flags
-                or any(
-                    arg.startswith(f"{flag}=")
-                    for flag in blocked_flags
-                    if flag.startswith("--")
-                )
-                for arg in parsed
-            ):
-                raise PolicyViolation("Verification command uses a blocked flag.")
-            args = self.policy.validate_command(command)
+            args = self.policy.validate_command(command, repo_root=self.repo_root)
         except PolicyViolation as exc:
             return ToolResult(
                 tool=AgentTool.RUN_CHECK,
