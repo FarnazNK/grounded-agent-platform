@@ -1,4 +1,4 @@
-# RAG Agent — Retrieval + Developer Agent Platform
+# Grounded Agent Platform — Retrieval, Tools, Evals & Guardrails
 
 [![CI](https://github.com/FarnazNK/rag-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/FarnazNK/rag-agent/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)
@@ -12,16 +12,18 @@
 
 **Live RAG API:** [API](https://rag-agent-api-2uau.onrender.com/) · [Docs](https://rag-agent-api-2uau.onrender.com/docs) · [Liveness](https://rag-agent-api-2uau.onrender.com/health/live) · [Readiness](https://rag-agent-api-2uau.onrender.com/health/ready)
 
-RAG Agent is a production-oriented AI systems project with two complementary surfaces:
+Grounded Agent Platform is a production-oriented AI engineering project for building grounded, tool-using systems whose behavior can be evaluated, constrained, verified, and observed. It combines two complementary surfaces:
 
-1. a multi-tenant retrieval-augmented generation API for grounded document answers; and
-2. a repository-aware developer-agent harness for context selection, tool use, reusable skills, verification, and traceable software-engineering workflows.
+1. a multi-tenant retrieval service that grounds model responses in authorized document context; and
+2. a repository-aware developer-agent harness that grounds model actions in selected code context, narrow tools, explicit execution policy, and verification.
 
-The design focuses on the parts that make AI systems useful beyond a demo: **context quality, explicit tool boundaries, evaluation, guardrails, authorization, observability, reproducible CI, and operational trade-offs**.
+Rather than treating RAG as the product, the platform treats **retrieval as one grounding mechanism inside a broader agent system**. The design focuses on the engineering layers that make AI systems useful beyond a demo: **context quality, tool boundaries, evaluation, guardrails, authorization, human-controlled write access, observability, reproducible CI, and operational trade-offs**.
 
 > The hosted service exposes the RAG API only. Repository filesystem and command tools are intentionally local-only. Write-capable agents should run inside stronger ephemeral sandbox boundaries before being exposed as a remote service.
 
 ## What this project demonstrates
+
+The project demonstrates how retrieval, tools, policy, evaluation, and verification can work together as one grounded-agent architecture. The hosted surface focuses on document-grounded answers, while the local developer-agent surface demonstrates controlled tool use against a repository.
 
 ### Developer-agent infrastructure
 
@@ -58,7 +60,7 @@ The design focuses on the parts that make AI systems useful beyond a demo: **con
 
 ```mermaid
 flowchart TB
-    subgraph DeveloperAgent["Developer Agent Harness — local execution"]
+    subgraph DeveloperAgent["Grounded Developer Agent — local execution"]
         task["Developer task"] --> context["Repository context builder"]
         context --> skill["Optional reusable skill"]
         skill --> planner["LLM tool planner"]
@@ -70,7 +72,7 @@ flowchart TB
         verify --> trace
     end
 
-    subgraph RAG["Hosted RAG API"]
+    subgraph RAG["Grounded Retrieval API — hosted"]
         client["API client"] --> api["FastAPI"]
         api --> auth["JWT + workspace authorization"]
         auth --> postgres[("PostgreSQL")]
@@ -91,11 +93,11 @@ flowchart TB
     evals --> retrieval
 ```
 
-The two surfaces share the same engineering principles: **retrieve only relevant context, constrain model capabilities outside the model, measure quality independently, and make behavior observable**.
+The two surfaces share the same engineering principles: **ground model behavior in relevant evidence, constrain capabilities outside the model, measure quality independently, require explicit operator control for mutation, verify outcomes, and make behavior observable**.
 
-## Developer Agent Harness
+## Grounded Developer Agent
 
-A software-engineering agent should not receive an entire large repository or unrestricted machine access. This project separates the problem into four layers.
+The developer-agent side grounds model decisions in bounded repository context and policy-controlled tools. A software-engineering agent should not receive an entire large repository or unrestricted machine access. This project separates the problem into four layers.
 
 ### 1. Context engineering
 
@@ -226,7 +228,7 @@ verification failure
 
 Measuring those stages independently makes regressions easier to diagnose.
 
-## RAG retrieval pipeline
+## Grounded retrieval pipeline
 
 ```text
 JWT + workspace authorization
@@ -248,7 +250,7 @@ grounded response
 
 Dense retrieval handles semantic similarity while lexical search preserves exact terms, identifiers, acronyms, and policy names.
 
-## RAG API
+## Grounded retrieval API
 
 | Route | Purpose |
 | --- | --- |
