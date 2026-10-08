@@ -58,6 +58,8 @@ The project demonstrates how retrieval, tools, policy, evaluation, and verificat
 
 ## Architecture
 
+The current retrieval pipeline is orchestrated directly by `RAGService`, and the local developer-agent harness uses its own planner/tool loop. LangGraph is not used in the current implementation.
+
 ```mermaid
 flowchart TB
     subgraph DeveloperAgent["Grounded Developer Agent — local execution"]
