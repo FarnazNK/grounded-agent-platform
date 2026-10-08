@@ -65,7 +65,7 @@ jobs:
       - name: Benchmark regression gate
         run: python benchmarks/load/run_benchmark.py --assert-p95-ms 500 --out benchmarks/load/results/ci-benchmark.json
       - name: Upload evaluation and benchmark reports
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: quality-reports
           path: |
