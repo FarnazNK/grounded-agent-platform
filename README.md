@@ -10,7 +10,7 @@
 ![Prometheus](https://img.shields.io/badge/Prometheus-metrics-E6522C)
 ![pytest](https://img.shields.io/badge/pytest-tested-0A9EDC)
 
-**Live RAG API:** [API](https://rag-agent-api-2uau.onrender.com/) · [Docs](https://rag-agent-api-2uau.onrender.com/docs) · [Liveness](https://rag-agent-api-2uau.onrender.com/health/live) · [Readiness](https://rag-agent-api-2uau.onrender.com/health/ready)
+**Live RAG API:** [API](https://grounded-agent-api.vercel.app/) · [Liveness](https://grounded-agent-api.vercel.app/health/live) · [Readiness](https://grounded-agent-api.vercel.app/health/ready)
 
 Grounded Agent Platform is a production-oriented AI engineering project for building grounded, tool-using systems whose behavior can be evaluated, constrained, verified, and observed. It combines two complementary surfaces:
 
@@ -306,7 +306,7 @@ Optional LangSmith tracing can be enabled for hosted model calls by supplying th
 
 ## Deployment
 
-The public RAG demo runs on Render with managed Neon PostgreSQL/pgvector and deterministic providers. The repository also contains:
+The public RAG demo runs on Vercel Hobby with managed Neon PostgreSQL/pgvector and deterministic providers. The repository also contains:
 
 - Docker / Docker Compose
 - Terraform environment scaffolding
