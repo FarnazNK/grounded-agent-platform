@@ -23,7 +23,7 @@ dependencies = [
     "langchain-openai>=0.2.10",
     "typer>=0.13",
     "rich>=13.9",
-    "pyyaml>=6.0",
+    "pyyaml>=6.0.3",
     "mangum>=0.19",
 ]
 
