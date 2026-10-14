@@ -109,7 +109,7 @@ def test_harness_fails_closed_for_unknown_skill(tmp_path):
 
 
 def test_harness_stops_at_max_steps(tmp_path):
-    (tmp_path / "service.py").write_text("value = 1\\n", encoding="utf-8")
+    (tmp_path / "service.py").write_text("value = 1\n", encoding="utf-8")
     planner = ScriptedPlanner(
         [
             AgentDecision(tool=AgentTool.READ_FILE, arguments={"path": "service.py"}),
@@ -122,7 +122,7 @@ def test_harness_stops_at_max_steps(tmp_path):
 
 
 def test_harness_blocks_policy_rejected_path(tmp_path):
-    (tmp_path / "service.py").write_text("value = 1\\n", encoding="utf-8")
+    (tmp_path / "service.py").write_text("value = 1\n", encoding="utf-8")
     planner = ScriptedPlanner(
         [AgentDecision(tool=AgentTool.READ_FILE, arguments={"path": "../outside.py"})]
     )
