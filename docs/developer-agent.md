@@ -1,7 +1,7 @@
 # Developer Agent Harness
 
 The developer-agent surface extends the retrieval system with a repository-aware,
-policy-controlled execution loop for software engineering tasks.
+LangGraph-orchestrated, policy-controlled execution loop for software engineering tasks.
 
 ## Goals
 
@@ -24,7 +24,10 @@ repository context builder
 optional reusable skill
     |
     v
-LLM tool planner
+LangGraph StateGraph: plan node
+    |
+    v
+LangGraph StateGraph: execute node
     |
     v
 tool registry ---------> list/read/search
@@ -40,7 +43,7 @@ repository workspace
 trace + changed files + verification output
 ```
 
-The model does not get direct shell or filesystem access. It chooses from registered
+The LangGraph conditional edges route from the planner to tool execution and back until\nthe model finishes, execution is blocked, or the step budget is reached. Graph nodes\npreserve the existing per-step trace. LangGraph does not bypass the tool policy.\n\nThe model does not get direct shell or filesystem access. It chooses from registered
 tools and the runtime validates the request again before execution.
 
 ## Context engineering
