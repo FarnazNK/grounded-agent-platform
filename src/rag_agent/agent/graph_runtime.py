@@ -67,7 +67,11 @@ def execute_graph(
                 "summary": f"Tool '{decision.tool.value}' is not allowed for this run.",
             }
         if decision.tool == AgentTool.FINISH:
-            logger.info("agent_run_completed", step=index, changed_files=sorted(state["changed_files"]))
+            logger.info(
+                "agent_run_completed",
+                step=index,
+                changed_files=sorted(state["changed_files"]),
+            )
             return {
                 "history": history,
                 "status": "completed",
@@ -129,7 +133,10 @@ def execute_graph(
         final = initial
     else:
         with request_context(agent_run_id=run_id):
-            final = compiled.invoke(initial, config={"recursion_limit": max(25, 2 * harness.max_steps + 5)})
+            final = compiled.invoke(
+                initial,
+                config={"recursion_limit": max(25, 2 * harness.max_steps + 5)},
+            )
 
     status = final["status"]
     summary = final["summary"]
