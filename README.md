@@ -10,7 +10,11 @@
 ![Prometheus](https://img.shields.io/badge/Prometheus-metrics-E6522C)
 ![pytest](https://img.shields.io/badge/pytest-tested-0A9EDC)
 
-**Live RAG API:** [API](https://grounded-agent-api.vercel.app/) · [Liveness](https://grounded-agent-api.vercel.app/health/live) · [Readiness](https://grounded-agent-api.vercel.app/health/ready)
+**Hosted RAG API:** [API](https://grounded-agent-api.vercel.app/) · [Liveness](https://grounded-agent-api.vercel.app/health/live) · [Readiness](https://grounded-agent-api.vercel.app/health/ready)
+
+**Find the code:** [Hosted FastAPI entry point](./src/rag_agent/api/app.py) · [Retrieval pipeline](./src/rag_agent/retrieval.py) · [Local developer-agent harness](./src/rag_agent/agent/harness.py) · [Authorization](./src/rag_agent/auth.py) · [Automated tests](./tests/) · [Deployment notes](./docs/deployment.md)
+
+**What runs where:** The hosted Vercel deployment exposes the RAG HTTP service, **not** the repository-writing developer agent, Terraform infrastructure, or a managed remote agent sandbox. Local tools require an operator-controlled checkout and explicit write enablement. Configured external model services are optional; deterministic providers support reproducible demos.
 
 Grounded Agent Platform is a production-oriented AI engineering project for building grounded, tool-using systems whose behavior can be evaluated, constrained, verified, and observed. It combines two complementary surfaces:
 
