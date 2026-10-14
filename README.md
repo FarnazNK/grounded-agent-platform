@@ -28,7 +28,7 @@ The project demonstrates how retrieval, tools, policy, evaluation, and verificat
 ### Developer-agent infrastructure
 
 - Task-aware repository context selection with a bounded context budget
-- JSON tool-planning loop for Anthropic or OpenAI models
+- LangGraph-orchestrated JSON tool-planning workflow for Anthropic or OpenAI models
 - Registry-backed tools for file listing, reads, code search, writes, and verification commands
 - Explicit write opt-in rather than implicit filesystem mutation
 - Repository-root confinement and sensitive-path blocking
@@ -58,7 +58,7 @@ The project demonstrates how retrieval, tools, policy, evaluation, and verificat
 
 ## Architecture
 
-The current retrieval pipeline is orchestrated directly by `RAGService`, and the local developer-agent harness uses its own planner/tool loop. LangGraph is not used in the current implementation.
+The retrieval pipeline is orchestrated directly by `RAGService`. The local developer-agent harness uses a **LangGraph StateGraph** to route between JSON planning and policy-enforced tool execution. LangGraph handles control flow; repository tools, write opt-in, and security policy remain implemented and enforced locally.
 
 ```mermaid
 flowchart TB
@@ -67,6 +67,7 @@ flowchart TB
         context --> skill["Optional reusable skill"]
         skill --> planner["LLM tool planner"]
         planner --> registry["Tool registry"]
+        registry -->|continue loop| planner
         registry --> policy["Execution policy"]
         policy --> repo["Repository workspace"]
         repo --> verify["Tests / lint / typecheck / build"]
@@ -339,6 +340,7 @@ A production deployment would still need organization-specific secret management
 
 **Agent platform**
 - repository context selection
+- LangGraph StateGraph orchestration
 - JSON tool planning
 - registry-backed tools
 - declarative skills
