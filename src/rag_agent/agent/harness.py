@@ -48,8 +48,6 @@ class DeveloperAgentHarness:
     def run(self, task: str, *, skill_name: str | None = None) -> AgentRunResult:
         run_id = str(uuid4())
         context = self.context_builder.build(task)
-        history: list[AgentStep] = []
-        changed_files: set[str] = set()
         skill = self.skills.get(skill_name)
 
         if skill_name and skill is None:
