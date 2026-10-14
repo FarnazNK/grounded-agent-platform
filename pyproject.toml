@@ -21,6 +21,7 @@ dependencies = [
     "pypdf>=6.14.2",
     "langchain-anthropic>=0.3.0",
     "langchain-openai>=0.2.10",
+    "langgraph>=0.2.60",
     "typer>=0.13",
     "rich>=13.9",
     "pyyaml>=6.0",
