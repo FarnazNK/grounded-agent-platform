@@ -106,3 +106,26 @@ def test_harness_fails_closed_for_unknown_skill(tmp_path):
     assert result.status == "blocked"
     assert result.skill == "missing-skill"
     assert "Unknown agent skill" in result.summary
+
+
+def test_harness_stops_at_max_steps(tmp_path):
+    (tmp_path / "service.py").write_text("value = 1\\n", encoding="utf-8")
+    planner = ScriptedPlanner(
+        [
+            AgentDecision(tool=AgentTool.READ_FILE, arguments={"path": "service.py"}),
+            AgentDecision(tool=AgentTool.READ_FILE, arguments={"path": "service.py"}),
+        ]
+    )
+    result = DeveloperAgentHarness(tmp_path, planner=planner, max_steps=2).run("inspect")
+    assert result.status == "max_steps"
+    assert len(result.steps) == 2
+
+
+def test_harness_blocks_policy_rejected_path(tmp_path):
+    (tmp_path / "service.py").write_text("value = 1\\n", encoding="utf-8")
+    planner = ScriptedPlanner(
+        [AgentDecision(tool=AgentTool.READ_FILE, arguments={"path": "../outside.py"})]
+    )
+    result = DeveloperAgentHarness(tmp_path, planner=planner).run("inspect outside")
+    assert result.status == "blocked"
+    assert len(result.steps) == 1
