@@ -1,5 +1,12 @@
 # Grounded Agent Platform — Retrieval, Tools, Evals & Guardrails
 
+## Kubernetes container orchestration (free local demo)
+
+The Docker images for Grounded Agent Platform can also be managed with **Kubernetes on your laptop using kind**. This is optional: Docker Compose and the existing APIs continue to work as before. The `k8s/local.yaml` example defines Kubernetes Deployments and internal ClusterIP Services, a local PostgreSQL persistent volume, resource limits, and external runtime-generated Secret references. No AWS account, managed Kubernetes service, or paid cloud resource is needed.
+
+Follow the setup and cleanup instructions in **[k8s/README.md](k8s/README.md)**. Kubernetes manifests are checked by a dedicated GitHub Actions validation workflow. This is a **local demonstration**, not a tested production or public cluster deployment.
+
+
 ## Internal gRPC retrieval demo (free, localhost-only)
 
 The public API remains **REST**. For service-to-service design practice, `grpc_demo/` demonstrates a separate **gRPC** retrieval contract using Protocol Buffers, a short request deadline, bearer-token metadata, and synthetic workspace-isolated responses. No real customer data or AWS access is used. The example runs on local loopback only and is not a production internal service.
