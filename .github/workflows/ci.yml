@@ -44,9 +44,9 @@ jobs:
           python -m pip install --upgrade pip 'setuptools>=83' wheel
           pip install -e '.[dev,tracing]'
       - name: Lint
-        run: ruff check src tests scripts
+        run: ruff check src tests scripts grpc_demo
       - name: Format check
-        run: ruff format --check src tests scripts
+        run: ruff format --check src tests scripts grpc_demo
       - name: Type check
         run: mypy src
       - name: Migrate database
