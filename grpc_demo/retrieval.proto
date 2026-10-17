@@ -1,0 +1,10 @@
+syntax = "proto3";
+package portfolio.retrieval.v1;
+
+import "google/protobuf/struct.proto";
+
+// This small portfolio demo intentionally uses Struct as the wire contract.
+// A real production service should use generated strongly typed messages.
+service Retrieval {
+  rpc Query(google.protobuf.Struct) returns (google.protobuf.Struct);
+}

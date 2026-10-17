@@ -1,5 +1,18 @@
 # Grounded Agent Platform — Retrieval, Tools, Evals & Guardrails
 
+## Internal gRPC retrieval demo (free, localhost-only)
+
+The public API remains **REST**. For service-to-service design practice, `grpc_demo/` demonstrates a separate **gRPC** retrieval contract using Protocol Buffers, a short request deadline, bearer-token metadata, and synthetic workspace-isolated responses. No real customer data or AWS access is used. The example runs on local loopback only and is not a production internal service.
+
+```bash
+pip install -e '.[dev]'
+python -m grpc_demo.demo_offline
+pytest tests/test_grpc_portfolio.py -q
+```
+
+For real deployments, replace the demo's shared bearer token and insecure local channel with workload identity and mutual TLS. See [the gRPC example](grpc_demo/retrieval.proto). Existing authentication, authorization, and security boundaries in the REST RAG API are unchanged.
+
+
 ## AWS Bedrock, Strands & AgentCore — free portfolio demo
 
 This repository includes an **optional, disabled-by-default** AWS-ready read-only agent reference: Strands Agents + Bedrock model integration, AgentCore runtime entrypoint, Bedrock Guardrails configuration and a JWT/workspace-scoped RAG integration route. **The cloud service has not been deployed or live-tested**; the public hosted API does not run AgentCore. No AWS account or charges are needed to evaluate the implementation.
