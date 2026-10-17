@@ -1,4 +1,5 @@
 """A zero-cloud local gRPC request: run python -m grpc_demo.demo_offline."""
+
 from __future__ import annotations
 
 import os
