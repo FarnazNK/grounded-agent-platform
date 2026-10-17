@@ -328,4 +328,49 @@ def create_app(service: RAGService | None = None) -> FastAPI:
         RETRIEVAL_GROUNDEDNESS.set(1.0 if result.grounded else 0.0)
         return QueryResponse(result=result)
 
+    @app.post("/v1/aws-agent/query")
+    def aws_agent_query(
+        req: QueryRequest,
+        request: Request,
+        user=Depends(current_user),
+        svc: RAGService = Depends(get_service),
+    ):
+        """Opt-in, authenticated, workspace-authorized, read-only AWS inference."""
+        import os
+
+        from rag_agent.aws_agentcore_client import AgentCoreTransportError, invoke_agentcore
+
+        if os.environ.get("ENABLE_AWS_AGENTCORE", "").lower() != "true":
+            return JSONResponse(status_code=404, content={"error": "not_found"})
+        request_id = request.headers.get("x-request-id") or str(uuid4())
+        result = svc.query(
+            user_id=user.id,
+            workspace_id=req.workspace_id,
+            query=req.query,
+            request_id=request_id,
+        )
+        if result.refusal or not result.chunks:
+            return {"answer": "Insufficient authorized reference context.", "sources": []}
+        # Authorization is enforced inside svc.query, before retrieving tenant documents.
+        # Never use result.answer as trusted context or pass caller-selected source text.
+        snippets = []
+        remaining = 12000
+        for chunk in result.chunks:
+            source = str(chunk.source_name)[:180]
+            body = str(chunk.content)
+            item = f"[source: {source}]\\n{body}\\n"
+            if len(item) > remaining:
+                item = item[:remaining]
+            if item:
+                snippets.append(item)
+                remaining -= len(item)
+            if remaining <= 0:
+                break
+        try:
+            answer = invoke_agentcore(prompt=req.query, context="\\n".join(snippets))
+        except AgentCoreTransportError:
+            return JSONResponse(status_code=503, content={"error": "agent_unavailable"})
+        # No downstream tool permissions; links/citations require separate verification.
+        return {"answer": answer, "sources": sorted({c.source_name for c in result.chunks})}
+
     return app
