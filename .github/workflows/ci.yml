@@ -55,6 +55,8 @@ jobs:
         run: pytest -q -m 'not integration'
       - name: Offline AWS agent portfolio demo
         run: python aws_agent/demo_offline.py
+      - name: Offline gRPC demo
+        run: python -m grpc_demo.demo_offline
       - name: Integration tests
         run: pytest -q -m integration
       - name: RAG evaluation gates
