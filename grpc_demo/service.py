@@ -16,11 +16,6 @@ _DATA = {
 
 
 def query(request: Struct, context: grpc.ServicerContext) -> Struct:
-    expected = os.environ.get("GRPC_DEMO_TOKEN", "")
-    metadata = dict(context.invocation_metadata())
-    supplied = metadata.get("authorization", "")
-    if not expected or not hmac.compare_digest(supplied, "Bearer " + expected):
-        context.abort(grpc.StatusCode.UNAUTHENTICATED, "Unauthorized")
     workspace = request.fields.get("workspace")
     prompt = request.fields.get("query")
     if not workspace or not prompt:
@@ -29,6 +24,11 @@ def query(request: Struct, context: grpc.ServicerContext) -> Struct:
     question = prompt.string_value
     if not wid or wid not in _DATA:
         context.abort(grpc.StatusCode.PERMISSION_DENIED, "Unknown workspace")
+    expected = os.environ.get(f"GRPC_DEMO_TOKEN_{wid.upper()}", "")
+    metadata = dict(context.invocation_metadata())
+    supplied = metadata.get("authorization", "")
+    if not expected or not hmac.compare_digest(supplied, "Bearer " + expected):
+        context.abort(grpc.StatusCode.UNAUTHENTICATED, "Unauthorized")
     if not question or len(question) > 1000:
         context.abort(grpc.StatusCode.INVALID_ARGUMENT, "Invalid query")
     response = Struct()
@@ -50,8 +50,8 @@ def make_server() -> grpc.Server:
 
 
 def main() -> None:
-    if not os.environ.get("GRPC_DEMO_TOKEN"):
-        raise SystemExit("Set GRPC_DEMO_TOKEN for the local-only demo")
+    if not os.environ.get("GRPC_DEMO_TOKEN_ALPHA"):
+        raise SystemExit("Set GRPC_DEMO_TOKEN_ALPHA for the local-only demo")
     server = make_server()
     port = server.add_insecure_port("127.0.0.1:50059")
     if not port:
