@@ -8,7 +8,8 @@ from grpc_demo.service import METHOD, make_server
 
 @pytest.fixture
 def transport(monkeypatch):
-    monkeypatch.setenv("GRPC_DEMO_TOKEN", "test-only-token")
+    monkeypatch.setenv("GRPC_DEMO_TOKEN_ALPHA", "test-only-token")
+    monkeypatch.setenv("GRPC_DEMO_TOKEN_BETA", "test-beta-token")
     server = make_server()
     port = server.add_insecure_port("127.0.0.1:0")
     server.start()
@@ -30,10 +31,13 @@ def invoke(call, workspace="alpha", query="find", token="Bearer test-only-token"
 
 def test_workspace_isolation(transport):
     a = invoke(transport, workspace="alpha")
-    b = invoke(transport, workspace="beta")
+    b = invoke(transport, workspace="beta", token="Bearer test-beta-token")
     assert a["sources"][0].startswith("Alpha:")
     assert b["sources"][0].startswith("Beta:")
     assert "Beta:" not in str(a)
+    with pytest.raises(grpc.RpcError) as error:
+        invoke(transport, workspace="beta", token="Bearer test-only-token")
+    assert error.value.code() == grpc.StatusCode.UNAUTHENTICATED
 
 
 @pytest.mark.parametrize(
