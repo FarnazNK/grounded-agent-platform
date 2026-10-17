@@ -44,9 +44,9 @@ jobs:
           python -m pip install --upgrade pip 'setuptools>=83' wheel
           pip install -e '.[dev,tracing]'
       - name: Lint
-        run: ruff check src tests scripts
+        run: ruff check src tests scripts grpc_demo
       - name: Format check
-        run: ruff format --check src tests scripts
+        run: ruff format --check src tests scripts grpc_demo
       - name: Type check
         run: mypy src
       - name: Migrate database
@@ -55,6 +55,8 @@ jobs:
         run: pytest -q -m 'not integration'
       - name: Offline AWS agent portfolio demo
         run: python aws_agent/demo_offline.py
+      - name: Offline gRPC demo
+        run: python -m grpc_demo.demo_offline
       - name: Integration tests
         run: pytest -q -m integration
       - name: RAG evaluation gates
