@@ -26,7 +26,10 @@ def test_runtime_not_configured_makes_no_aws_call(monkeypatch):
         invoke_agentcore(prompt="question", context="synthetic")
 
 
-@pytest.mark.parametrize("prompt, context", [("", "data"), ("x" * 4001, "data"), ("q", "x" * 12001)])
+@pytest.mark.parametrize(
+    "prompt, context",
+    [("", "data"), ("x" * 4001, "data"), ("q", "x" * 12001)],
+)
 def test_request_bounds_fail_before_sdk_import(monkeypatch, prompt, context):
     monkeypatch.setenv(
         "AGENTCORE_RUNTIME_ARN",
@@ -43,7 +46,9 @@ def test_signed_runtime_invocation_uses_fixed_arn_and_bounded_response(monkeypat
     monkeypatch.setitem(
         sys.modules,
         "boto3",
-        types.SimpleNamespace(client=lambda service: client if service == "bedrock-agentcore" else None),
+        types.SimpleNamespace(
+            client=lambda service: client if service == "bedrock-agentcore" else None
+        ),
     )
     assert invoke_agentcore(prompt="question", context="public context") == "ok"
     payload = client.calls[0]
