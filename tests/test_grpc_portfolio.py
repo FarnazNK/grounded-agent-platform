@@ -1,4 +1,5 @@
 """Authenticated local gRPC transport regression tests (no AWS, no network egress)."""
+
 import grpc
 import pytest
 from google.protobuf.struct_pb2 import Struct
