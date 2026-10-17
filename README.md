@@ -1,5 +1,18 @@
 # Grounded Agent Platform — Retrieval, Tools, Evals & Guardrails
 
+## AWS Bedrock, Strands & AgentCore — free portfolio demo
+
+This repository includes an **optional, disabled-by-default** AWS-ready read-only agent reference: Strands Agents + Bedrock model integration, AgentCore runtime entrypoint, Bedrock Guardrails configuration and a JWT/workspace-scoped RAG integration route. **The cloud service has not been deployed or live-tested**; the public hosted API does not run AgentCore. No AWS account or charges are needed to evaluate the implementation.
+
+Run the local mock-only demo from the repository root (Python required):
+
+```bash
+python aws_agent/demo_offline.py
+```
+
+Tests: `pytest tests/test_aws_agent.py tests/test_aws_agentcore_transport.py -q`. See [`aws_agent/PORTFOLIO.md`](aws_agent/PORTFOLIO.md) for the trust boundaries, threat model, limitations and interview walkthrough. These examples do not make AWS requests unless you explicitly configure and enable the separate real backend integration.
+
+
 [![CI](https://github.com/FarnazNK/grounded-agent-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/FarnazNK/grounded-agent-platform/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)
 ![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)
