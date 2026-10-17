@@ -10,7 +10,7 @@ from grpc_demo.service import METHOD, make_server
 
 
 def main() -> None:
-    os.environ["GRPC_DEMO_TOKEN"] = "local-demo-not-for-production"
+    os.environ["GRPC_DEMO_TOKEN_ALPHA"] = "local-demo-not-for-production"
     server = make_server()
     port = server.add_insecure_port("127.0.0.1:0")
     server.start()
