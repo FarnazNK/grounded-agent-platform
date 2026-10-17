@@ -2,14 +2,6 @@ name: Deploy backend to AWS Lambda
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - "src/**"
-      - "pyproject.toml"
-      - "Makefile"
-      - "infra/aws/**"
-      - ".github/workflows/deploy-aws.yml"
 
 permissions:
   contents: read
