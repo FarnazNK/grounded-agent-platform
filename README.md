@@ -10,7 +10,7 @@ python -m grpc_demo.demo_offline
 pytest tests/test_grpc_portfolio.py -q
 ```
 
-For real deployments, replace the demo's shared bearer token and insecure local channel with workload identity and mutual TLS. See [the gRPC example](grpc_demo/retrieval.proto). Existing authentication, authorization, and security boundaries in the REST RAG API are unchanged.
+For real deployments, replace the demo's per-workspace static bearer tokens and insecure localhost-only channel with workload identity, mutual TLS, and a production authorization service. See [the gRPC example](grpc_demo/retrieval.proto). Existing authentication, authorization, and security boundaries in the REST RAG API are unchanged.
 
 
 ## AWS Bedrock, Strands & AgentCore — free portfolio demo
