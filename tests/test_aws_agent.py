@@ -33,12 +33,8 @@ def test_empty_context_fails_closed_without_model():
 
 
 def test_no_secrets_in_error():
-    assert module.invoke({"prompt": "ok", "context": 12}) == {
-        "error": (
-            "Invalid request: prompt/context must be correctly formatted "
-            "and within size limits"
-        )
-    }
+    expected = "Invalid request: prompt/context must be correctly formatted and within size limits"
+    assert module.invoke({"prompt": "ok", "context": 12}) == {"error": expected}
 
 
 def test_no_write_capabilities_exposed():
