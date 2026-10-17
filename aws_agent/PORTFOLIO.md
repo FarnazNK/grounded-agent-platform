@@ -23,3 +23,13 @@ The tests fake the Strands and Bedrock model objects, exercise malformed request
 5. CI covers security regressions. A future live deployment would additionally require least-privilege IAM, API quotas, threat-model review, output citation validation, cost budgets, staging adversarial tests, and real AWS security testing.
 
 **Limitations:** Mock tests do not establish that the AWS model ID, Guardrails SDK arguments, runtime shape, or infrastructure policies work in a real AWS account. The AgentCore route uses the existing RAG generation path before AWS for reuse; this is not optimal for production latency or spend. AWS activation remains deliberately off.
+
+## One-command offline demo
+
+From the repository root:
+
+```bash
+python aws_agent/demo_offline.py
+```
+
+The demo uses fake model/runtime objects and mock response streams. This command needs only Python and does **not** contact AWS. CI executes the same command to prevent demo regressions.
