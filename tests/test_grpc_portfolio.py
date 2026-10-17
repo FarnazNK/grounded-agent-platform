@@ -1,6 +1,4 @@
 """Authenticated local gRPC transport regression tests (no AWS, no network egress)."""
-import os
-
 import grpc
 import pytest
 from google.protobuf.struct_pb2 import Struct
@@ -44,7 +42,12 @@ def test_workspace_isolation(transport):
         ("alpha", "find", "", grpc.StatusCode.UNAUTHENTICATED),
         ("alpha", "find", "Bearer wrong", grpc.StatusCode.UNAUTHENTICATED),
         ("unknown", "find", "Bearer test-only-token", grpc.StatusCode.PERMISSION_DENIED),
-        ("alpha", "x" * 1001, "Bearer test-only-token", grpc.StatusCode.INVALID_ARGUMENT),
+        (
+            "alpha",
+            "x" * 1001,
+            "Bearer test-only-token",
+            grpc.StatusCode.INVALID_ARGUMENT,
+        ),
     ],
 )
 def test_transport_rejects_invalid_calls(transport, workspace, query, token, expected):
