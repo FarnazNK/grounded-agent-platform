@@ -28,3 +28,10 @@ This directory is a **separate deployment entrypoint**. It does not modify the h
 5. Integrate the existing FastAPI authorization + retrieval pipeline on the **caller side**. Do not trust direct client-supplied context or client identity; never let the LLM select the tenant.
 
 Do not claim this sample is production-ready or secure by itself: AWS authorization, IAM, Guardrails, model availability, runtime provisioning, rate limiting, tenant context enforcement, and end-to-end verification are deployment responsibilities.
+
+
+## Existing FastAPI integration (opt-in)
+
+An authenticated `POST /v1/aws-agent/query` route is added to the existing FastAPI application. It is disabled unless `ENABLE_AWS_AGENTCORE=true` and `AGENTCORE_RUNTIME_ARN` references the private, IAM-authorized runtime. The route reuses `RAGService.query` to enforce user authentication, workspace membership and retrieval guardrails; it sends only the bounded authorized retrieved chunks to AgentCore. The route does not accept a runtime ARN, source context or tenant authorization flag from the client. Deploy the existing FastAPI backend in a server runtime with `boto3` installed and AWS IAM execution credentials; do not set these variables on the browser.
+
+The existing RAG query path runs its own answer-generation step before AgentCore, adding latency and cost; refactor this to reuse a retrieval-only service method before production scale. Verify source citations against actual returned chunk identifiers and scan output for PII before exposure. Do not permit model-chosen workspace IDs or write tools. This remains a staging-only implementation until production guardrails, quotas, network controls and cross-tenant tests are verified.
