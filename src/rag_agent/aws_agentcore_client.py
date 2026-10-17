@@ -1,4 +1,5 @@
 """Backend-only AgentCore Runtime transport, with no client-selected ARN."""
+
 from __future__ import annotations
 
 import json
