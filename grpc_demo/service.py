@@ -1,4 +1,5 @@
 """Loopback-only, workspace-scoped gRPC demo with synthetic documents."""
+
 from __future__ import annotations
 
 import hmac
@@ -44,7 +45,11 @@ def make_server() -> grpc.Server:
         response_serializer=Struct.SerializeToString,
     )
     server.add_generic_rpc_handlers(
-        (grpc.method_handlers_generic_handler("portfolio.retrieval.v1.Retrieval", {"Query": handler}),)
+        (
+            grpc.method_handlers_generic_handler(
+                "portfolio.retrieval.v1.Retrieval", {"Query": handler}
+            ),
+        )
     )
     return server
 
