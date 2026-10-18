@@ -1,5 +1,18 @@
 # Grounded Agent Platform — Retrieval, Tools, Evals & Guardrails
 
+> **Grounded Agent Platform at a glance:** A Python/FastAPI AI backend for workspace-scoped document retrieval and policy-controlled developer-agent workflows. This is an API-first project, **not a React frontend**.
+>
+> **Try it:** [Hosted API docs](https://grounded-agent-api.vercel.app/docs) · [Health endpoint](https://grounded-agent-api.vercel.app/health/live) · [Core implementation](src/rag_agent/) · [Evaluation scripts](scripts/)
+>
+> **Engineering highlights:** PostgreSQL/pgvector and full-text hybrid retrieval; reciprocal-rank fusion; workspace authorization; citation/output validation; bounded agent tools with explicit write permissions; RAG/adversarial/context/latency evaluation gates; structured observability.
+>
+> **Design decisions:** Retrieval and generation are separated; tool policy is enforced outside the model; deterministic test providers enable repeatable CI; model outputs are checked rather than trusted.
+>
+> **Demo boundaries:** Hosted behavior depends on configured providers. Optional AWS, local Kubernetes, and other infrastructure examples should not be mistaken for deployed production services.
+>
+> **Where to look:** `src/rag_agent/retrieval.py`, `src/rag_agent/agent/`, `src/rag_agent/guardrails/`, `src/rag_agent/evals/`, and `tests/`.
+
+
 ## Prometheus & Grafana — free local monitoring
 
 The optional [Prometheus and Grafana Kubernetes add-on](k8s/MONITORING.md) collects application HTTP metrics and provides dashboards on a **localhost-only kind cluster**, with no AWS costs. Prometheus and Grafana run as private ClusterIP Services, and Grafana's admin password is created as a Kubernetes Secret. CI validates the manifests; this is a locally runnable portfolio setup, **not** a live production monitoring deployment.
