@@ -63,6 +63,10 @@ jobs:
         run: |
           python scripts/run_evals.py --dataset data/eval_datasets/quality.yaml --out benchmarks/results/eval_report.json
           python scripts/run_evals.py --dataset data/eval_datasets/adversarial.yaml --out benchmarks/results/adversarial_eval_report.json
+          # Larger offline regression sets (23 + 40 questions over 60 documents).
+          # hr_holdout.yaml is held out from retrieval tuning.
+          python scripts/run_evals.py --dataset data/eval_datasets/hr_full.yaml --out benchmarks/results/hr_full_eval_report.json
+          python scripts/run_evals.py --dataset data/eval_datasets/hr_holdout.yaml --out benchmarks/results/hr_holdout_eval_report.json
       - name: Developer-agent context gate
         run: |
           python scripts/run_agent_evals.py --threshold 0.75 --out benchmarks/results/agent_context_eval.json

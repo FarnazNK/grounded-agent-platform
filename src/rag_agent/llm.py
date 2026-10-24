@@ -115,7 +115,13 @@ class LangChainLLMProvider:
             raise
 
     def answer_question(self, query: str, chunks: list[RetrievedChunk]) -> LLMResult:
-        prompt = self._render_prompt(query, chunks)
+        return self._call(self._render_prompt(query, chunks), fallback_prompt=query)
+
+    def complete(self, system: str, user: str) -> LLMResult:
+        """One system + user turn. Used by the reranker and the eval judge."""
+        return self._call([("system", system), ("user", user)], fallback_prompt=user)
+
+    def _call(self, prompt: list[tuple[str, str]], *, fallback_prompt: str) -> LLMResult:
         start = time.perf_counter()
         response = _retry_provider_call(lambda: self._invoke(prompt))
         latency_ms = (time.perf_counter() - start) * 1000
@@ -125,20 +131,31 @@ class LangChainLLMProvider:
         text = str(content).strip()
         if not text:
             raise MalformedLLMOutputError("Provider returned an empty answer.")
-        usage_meta = getattr(response, "response_metadata", {}) or {}
-        usage = usage_meta.get("token_usage", {}) or {}
-        prompt_tokens = int(usage.get("prompt_tokens", max(1, len(query.split()))))
-        completion_tokens = int(usage.get("completion_tokens", max(1, len(text.split()))))
-        total_tokens = int(usage.get("total_tokens", prompt_tokens + completion_tokens))
+        prompt_tokens, completion_tokens = _token_counts(response, fallback_prompt, text)
         return LLMResult(
             text=text,
             usage=UsageInfo(
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
-                total_tokens=total_tokens,
+                total_tokens=prompt_tokens + completion_tokens,
             ),
             latency_ms=latency_ms,
         )
+
+
+def _token_counts(response: Any, prompt: str, text: str) -> tuple[int, int]:
+    """Real token usage from the provider, with a word-count estimate as fallback.
+
+    LangChain exposes ``usage_metadata`` (input/output tokens) for both Anthropic
+    and OpenAI; older OpenAI responses only carry ``token_usage``.
+    """
+    usage_metadata = getattr(response, "usage_metadata", None) or {}
+    if usage_metadata.get("input_tokens") is not None:
+        return int(usage_metadata["input_tokens"]), int(usage_metadata.get("output_tokens", 0))
+    token_usage = (getattr(response, "response_metadata", {}) or {}).get("token_usage", {}) or {}
+    if token_usage.get("prompt_tokens") is not None:
+        return int(token_usage["prompt_tokens"]), int(token_usage.get("completion_tokens", 0))
+    return max(1, len(prompt.split())), max(1, len(text.split()))
 
 
 def build_llm_provider(settings: Settings | None = None) -> LLMProvider:

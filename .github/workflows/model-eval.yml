@@ -1,0 +1,101 @@
+name: model-eval
+
+# Real-model evaluation. Manual only: it spends API credits and needs secrets,
+# so it never runs on pull requests (including from forks).
+#
+# Setup: add ANTHROPIC_API_KEY and/or OPENAI_API_KEY under
+# Settings -> Secrets and variables -> Actions, then run this workflow from the
+# Actions tab. The report appears in the run summary and as an artifact.
+on:
+  workflow_dispatch:
+    inputs:
+      provider:
+        description: Answering model provider
+        type: choice
+        options: [anthropic, openai]
+        default: anthropic
+      model:
+        description: Answering model ID (as the provider names it)
+        type: string
+        required: true
+      judge_provider:
+        description: Judge provider
+        type: choice
+        options: [anthropic, openai]
+        default: anthropic
+      judge_model:
+        description: Judge model ID (ideally at least as capable as the answering model)
+        type: string
+        required: true
+      rerankers:
+        description: Rerankers to compare (space separated)
+        type: string
+        default: none lexical llm
+      input_price:
+        description: Answering model USD per 1M input tokens (from the provider's price list)
+        type: string
+        default: "0"
+      output_price:
+        description: Answering model USD per 1M output tokens
+        type: string
+        default: "0"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: model-eval
+  cancel-in-progress: false
+
+jobs:
+  model-eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      APP_JWT_SECRET: model-eval-secret-model-eval-secret-xx
+      APP_EMBEDDING_PROVIDER: deterministic
+      APP_LLM_PROVIDER: ${{ inputs.provider }}
+      APP_LLM_MODEL: ${{ inputs.model }}
+      APP_JUDGE_PROVIDER: ${{ inputs.judge_provider }}
+      APP_JUDGE_MODEL: ${{ inputs.judge_model }}
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: pip
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip 'setuptools>=83' wheel
+          pip install -e .
+      - name: Check the needed API keys are set
+        run: |
+          for p in "$APP_LLM_PROVIDER" "$APP_JUDGE_PROVIDER"; do
+            key="$(echo "$p" | tr a-z A-Z)_API_KEY"
+            if [ -z "${!key}" ]; then
+              echo "::error::Add the $key repository secret to run with provider '$p'."
+              exit 1
+            fi
+          done
+      - name: Run evaluation
+        env:
+          RERANKERS: ${{ inputs.rerankers }}
+          INPUT_PRICE: ${{ inputs.input_price }}
+          OUTPUT_PRICE: ${{ inputs.output_price }}
+        run: |
+          # shellcheck disable=SC2086 # RERANKERS is a space-separated list on purpose
+          python scripts/run_model_eval.py \
+            --rerankers $RERANKERS \
+            --judge \
+            --input-price "$INPUT_PRICE" \
+            --output-price "$OUTPUT_PRICE" \
+            --out benchmarks/results/model_eval
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: model-eval-report
+          path: benchmarks/results/model_eval/
+          if-no-files-found: warn
