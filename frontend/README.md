@@ -8,7 +8,9 @@ A React/Vite/TypeScript front end that shows how Grounded Agent Platform answers
 
 - Opens straight into a demo workspace. There is no sign-in and no account.
 - Ships with sample documents describing the platform's architecture, retrieval, security, evaluation and developer agent.
-- Ranks passages with a small BM25 scorer and answers only from retrieved passages, with numbered citations. If nothing matches, it says so instead of guessing.
+- Shows the full workflow for every question: input guardrails, workspace scoping, dense and lexical search, weighted reciprocal-rank fusion, a grounding check, answer generation, citation validation and PII redaction, each with its timing and the backend module it mirrors.
+- The pipeline is a browser port of the backend's deterministic CI mode (`src/rag_agent/`): the same injection and PII patterns, the same fusion formula and weights, and a hashed-token embedding.
+- A "How it works" page lays out the RAG pipeline, the local developer agent and the CI quality gates.
 - Visitors can add their own `.txt` or `.md` file (up to 200 KB). It is read in the browser and never uploaded.
 
 ## Safety
