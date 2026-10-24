@@ -1,4 +1,5 @@
 name: hr_smoke
+corpus_dir: data/sample_corpus_extended
 description: >
   Smoke test suite for the HR-tech agent. Covers retrieval accuracy, answer
   correctness, router behavior, and refusal handling. Run this on every PR.

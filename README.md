@@ -1,444 +1,144 @@
-# Grounded Agent Platform — Retrieval, Tools, Evals & Guardrails
+# Grounded Agent Platform
 
-> **Grounded Agent Platform at a glance:** A Python/FastAPI AI backend for workspace-scoped document retrieval and policy-controlled developer-agent workflows. This is an API-first project, **not a React frontend**.
->
-> **Try it:** [Hosted API docs](https://grounded-agent-api.vercel.app/docs) · [Health endpoint](https://grounded-agent-api.vercel.app/health/live) · [Core implementation](src/rag_agent/) · [Evaluation scripts](scripts/)
->
-> **Engineering highlights:** PostgreSQL/pgvector and full-text hybrid retrieval; reciprocal-rank fusion; workspace authorization; citation/output validation; bounded agent tools with explicit write permissions; RAG/adversarial/context/latency evaluation gates; structured observability.
->
-> **Design decisions:** Retrieval and generation are separated; tool policy is enforced outside the model; deterministic test providers enable repeatable CI; model outputs are checked rather than trusted.
->
-> **Demo boundaries:** Hosted behavior depends on configured providers. Optional AWS, local Kubernetes, and other infrastructure examples should not be mistaken for deployed production services.
->
-> **Where to look:** `src/rag_agent/retrieval.py`, `src/rag_agent/agent/`, `src/rag_agent/guardrails/`, `src/rag_agent/evals/`, and `tests/`.
+**An applied-AI backend for answers and actions you can trust.** A multi-tenant RAG API that answers only from documents a user is allowed to see, and a developer agent whose tool use is controlled by policy outside the model. Both are measured by evaluation gates in CI.
 
+[![CI](https://github.com/FarnazNK/grounded-agent-platform/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/FarnazNK/grounded-agent-platform/actions/workflows/ci.yml)
+[![Security](https://github.com/FarnazNK/grounded-agent-platform/actions/workflows/security.yml/badge.svg?branch=main)](https://github.com/FarnazNK/grounded-agent-platform/actions/workflows/security.yml)
+![Python](https://img.shields.io/badge/Python-3.11%2B-3776AB?logo=python&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
+![pgvector](https://img.shields.io/badge/PostgreSQL-pgvector-4169E1?logo=postgresql&logoColor=white)
 
-## Prometheus & Grafana — free local monitoring
+**[📘 Live API docs](https://grounded-agent-api.vercel.app/docs)** · **[💚 Health](https://grounded-agent-api.vercel.app/health/ready)** · **[🧠 Core code](src/rag_agent/)** · **[📊 Evaluations](scripts/)**
 
-The optional [Prometheus and Grafana Kubernetes add-on](k8s/MONITORING.md) collects application HTTP metrics and provides dashboards on a **localhost-only kind cluster**, with no AWS costs. Prometheus and Grafana run as private ClusterIP Services, and Grafana's admin password is created as a Kubernetes Secret. CI validates the manifests; this is a locally runnable portfolio setup, **not** a live production monitoring deployment.
+> API-only project: there's no web UI. The live link opens interactive Swagger docs.
 
+---
 
-## Kubernetes container orchestration (free local demo)
+## At a glance
 
-The Docker images for Grounded Agent Platform can also be managed with **Kubernetes on your laptop using kind**. This is optional: Docker Compose and the existing APIs continue to work as before. The `k8s/local.yaml` example defines Kubernetes Deployments and internal ClusterIP Services, a local PostgreSQL persistent volume, resource limits, and external runtime-generated Secret references. No AWS account, managed Kubernetes service, or paid cloud resource is needed.
+| | |
+| --- | --- |
+| **What it is** | (1) A RAG API: upload documents per workspace, ask questions, get answers with checked citations. (2) A developer agent that reads code, proposes changes and runs tests, within strict rules. |
+| **AI techniques** | Hybrid retrieval (pgvector + full-text) with reciprocal-rank fusion, citation validation, input/context/output guardrails, tool-calling agent loop, reusable skills |
+| **Backend** | Python, FastAPI, Pydantic, SQLAlchemy, PostgreSQL 16 + pgvector, Alembic, JWT |
+| **Models** | Anthropic or OpenAI adapters, plus deterministic offline providers for reproducible CI |
+| **Quality** | 101 unit tests + PostgreSQL integration tests, RAG and adversarial eval gates, agent context eval, p95 latency gate, mypy, CodeQL, pip-audit |
+| **Deployed on** | Vercel with Neon PostgreSQL/pgvector (RAG API only) |
 
-Follow the setup and cleanup instructions in **[k8s/README.md](k8s/README.md)**. Kubernetes manifests are checked by a dedicated GitHub Actions validation workflow. This is a **local demonstration**, not a tested production or public cluster deployment.
+## What I built
 
+### 🔎 Hybrid retrieval with checked citations
+Dense search (pgvector) finds meaning; full-text search catches exact terms like policy names, acronyms and IDs. The two rankings are merged with **weighted reciprocal-rank fusion**. Before an answer goes out, its citations are **validated against the retrieved sources**, and PII filters run on the output. Retrieval and embedding caches invalidate automatically when a document is re-indexed.
+→ [`src/rag_agent/retrieval.py`](src/rag_agent/retrieval.py), [`src/rag_agent/service.py`](src/rag_agent/service.py)
 
-## Internal gRPC retrieval demo (free, localhost-only)
+### 🏢 Multi-tenant by design
+Organizations → workspaces → viewer/editor/admin memberships. Every upload, re-index, delete and query is **scoped to a workspace the user belongs to**. The app refuses to start in staging or production if the admin-bootstrap shortcut is switched on.
+→ [`src/rag_agent/auth.py`](src/rag_agent/auth.py)
 
-The public API remains **REST**. For service-to-service design practice, `grpc_demo/` demonstrates a separate **gRPC** retrieval contract using Protocol Buffers, a short request deadline, bearer-token metadata, and synthetic workspace-isolated responses. No real customer data or AWS access is used. The example runs on local loopback only and is not a production internal service.
+### 🤖 A developer agent where *the model proposes and policy decides*
+The agent picks the most relevant files within a fixed context budget, then plans with narrow tools (`list_files`, `read_file`, `search_code`, `write_file`, `run_check`, `finish`). Every tool call is checked **outside the model**: it can't leave the repo, can't touch credential-like paths, can only run allowlisted test/lint commands **without a shell**, and **can't write at all unless the operator passes `--allow-writes`**. Each run produces a step-by-step trace. Reusable YAML skills (`code-change`, `debug`, `review`) bring their own tool allowlists.
+→ [`src/rag_agent/agent/`](src/rag_agent/agent/), [`agent_skills/`](agent_skills/)
 
-```bash
-pip install -e '.[dev]'
-python -m grpc_demo.demo_offline
-pytest tests/test_grpc_portfolio.py -q
-```
+### 📏 AI quality measured in CI, not assumed
+Every pull request must pass:
 
-For real deployments, replace the demo's per-workspace static bearer tokens and insecure localhost-only channel with workload identity, mutual TLS, and a production authorization service. See [the gRPC example](grpc_demo/retrieval.proto). Existing authentication, authorization, and security boundaries in the REST RAG API are unchanged.
+| Gate | What it checks | Result on the CI sets |
+| --- | --- | --- |
+| RAG quality | Right source retrieved, answer grounded, citations correct | recall 1.0, citation correctness 1.0, hallucination 0.0 |
+| Adversarial | Prompt-injection and unsafe requests get blocked | all blocked |
+| Agent context | Agent selects the correct files for known tasks (top-8) | 1.0 (threshold 0.75) |
+| Latency | p95 request latency on the benchmark | ~4 ms (limit 500 ms) |
 
+Plus Ruff, mypy, unit and PostgreSQL/pgvector integration tests, `pip-audit`, a production Docker build, and **CodeQL**. Reports are uploaded as CI artifacts.
+→ [`scripts/run_evals.py`](scripts/run_evals.py), [`data/eval_datasets/`](data/eval_datasets/), [`.github/workflows/ci.yml`](.github/workflows/ci.yml)
 
-## AWS Bedrock, Strands & AgentCore — free portfolio demo
-
-This repository includes an **optional, disabled-by-default** AWS-ready read-only agent reference: Strands Agents + Bedrock model integration, AgentCore runtime entrypoint, Bedrock Guardrails configuration and a JWT/workspace-scoped RAG integration route. **The cloud service has not been deployed or live-tested**; the public hosted API does not run AgentCore. No AWS account or charges are needed to evaluate the implementation.
-
-Run the local mock-only demo from the repository root (Python required):
-
-```bash
-python aws_agent/demo_offline.py
-```
-
-Tests: `pytest tests/test_aws_agent.py tests/test_aws_agentcore_transport.py -q`. See [`aws_agent/PORTFOLIO.md`](aws_agent/PORTFOLIO.md) for the trust boundaries, threat model, limitations and interview walkthrough. These examples do not make AWS requests unless you explicitly configure and enable the separate real backend integration.
-
-
-[![CI](https://github.com/FarnazNK/grounded-agent-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/FarnazNK/grounded-agent-platform/actions/workflows/ci.yml)
-![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.115%2B-009688?logo=fastapi&logoColor=white)
-![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
-![pgvector](https://img.shields.io/badge/pgvector-enabled-4169E1)
-![Docker](https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white)
-![Terraform](https://img.shields.io/badge/Terraform-IaC-844FBA?logo=terraform&logoColor=white)
-![Prometheus](https://img.shields.io/badge/Prometheus-metrics-E6522C)
-![pytest](https://img.shields.io/badge/pytest-tested-0A9EDC)
-
-**Hosted RAG API:** [API](https://grounded-agent-api.vercel.app/) · [Liveness](https://grounded-agent-api.vercel.app/health/live) · [Readiness](https://grounded-agent-api.vercel.app/health/ready)
-
-**Find the code:** [Hosted FastAPI entry point](./src/rag_agent/api/app.py) · [Retrieval pipeline](./src/rag_agent/retrieval.py) · [Local developer-agent harness](./src/rag_agent/agent/harness.py) · [Authorization](./src/rag_agent/auth.py) · [Automated tests](./tests/) · [Deployment notes](./docs/deployment.md)
-
-**What runs where:** The hosted Vercel deployment exposes the RAG HTTP service, **not** the repository-writing developer agent, Terraform infrastructure, or a managed remote agent sandbox. Local tools require an operator-controlled checkout and explicit write enablement. Configured external model services are optional; deterministic providers support reproducible demos.
-
-Grounded Agent Platform is a production-oriented AI engineering project for building grounded, tool-using systems whose behavior can be evaluated, constrained, verified, and observed. It combines two complementary surfaces:
-
-1. a multi-tenant retrieval service that grounds model responses in authorized document context; and
-2. a repository-aware developer-agent harness that grounds model actions in selected code context, narrow tools, explicit execution policy, and verification.
-
-Rather than treating RAG as the product, the platform treats **retrieval as one grounding mechanism inside a broader agent system**. The design focuses on the engineering layers that make AI systems useful beyond a demo: **context quality, tool boundaries, evaluation, guardrails, authorization, human-controlled write access, observability, reproducible CI, and operational trade-offs**.
-
-> The hosted service exposes the RAG API only. Repository filesystem and command tools are intentionally local-only. Write-capable agents should run inside stronger ephemeral sandbox boundaries before being exposed as a remote service.
-
-## What this project demonstrates
-
-The project demonstrates how retrieval, tools, policy, evaluation, and verification can work together as one grounded-agent architecture. The hosted surface focuses on document-grounded answers, while the local developer-agent surface demonstrates controlled tool use against a repository.
-
-### Developer-agent infrastructure
-
-- Task-aware repository context selection with a bounded context budget
-- JSON tool-planning loop for Anthropic or OpenAI models
-- Registry-backed tools for file listing, reads, code search, writes, and verification commands
-- Explicit write opt-in rather than implicit filesystem mutation
-- Repository-root confinement and sensitive-path blocking
-- Verification-command allowlisting with shell-free subprocess execution
-- Reusable YAML skills for code changes, debugging, and read-only review
-- Structured per-step run traces with tool outcomes and changed-file tracking
-- Context-selection evaluation dataset and CI quality gate
-- Deterministic offline planner for CI and context-only dry runs
-
-### Production RAG
-
-- Authenticated document upload, re-index, deletion, and query APIs
-- Organizations, workspaces, membership-based authorization, and tenant isolation
-- PostgreSQL persistence with pgvector dense retrieval
-- PostgreSQL lexical/full-text retrieval
-- Weighted reciprocal-rank fusion for hybrid search
-- Bounded overlapping chunking
-- Deterministic local embedding and LLM providers for reproducible CI
-- Optional Anthropic and OpenAI adapters
-- Deterministic regex-based prompt-injection screening on input and retrieved context; useful as a first-pass filter, but intentionally treated as bypassable and not a security boundary
-- PII/output guardrails and citation validation
-- Retrieval and embedding caches with index-version invalidation
-- Structured JSON logging and request correlation IDs
-- Prometheus metrics and Grafana dashboard
-- Quality, adversarial, latency, security, and Docker gates in CI
-- Terraform and AWS Lambda/SAM deployment paths
+### 🛡️ Layered guardrails, honestly labeled
+Prompt-injection screening runs on user input **and** retrieved document text. It's regex-based, so it's treated as a first-pass filter that can be bypassed, **not** the security boundary. The real protection comes from authorization, tool policy and output validation.
+→ [`src/rag_agent/guardrails/`](src/rag_agent/guardrails/)
 
 ## Architecture
 
-The current retrieval pipeline is orchestrated directly by `RAGService`, and the local developer-agent harness uses its own planner/tool loop. LangGraph is not used in the current implementation.
-
 ```mermaid
-flowchart TB
-    subgraph DeveloperAgent["Grounded Developer Agent — local execution"]
-        task["Developer task"] --> context["Repository context builder"]
-        context --> skill["Optional reusable skill"]
-        skill --> planner["LLM tool planner"]
-        planner --> registry["Tool registry"]
-        registry --> policy["Execution policy"]
-        policy --> repo["Repository workspace"]
-        repo --> verify["Tests / lint / typecheck / build"]
-        registry --> trace["Run trace"]
-        verify --> trace
+flowchart LR
+    subgraph RAG["RAG API · hosted"]
+        C["Client"] --> A["FastAPI<br/>JWT + workspace auth"]
+        A --> GI["Input guardrails"]
+        GI --> R["Dense (pgvector) +<br/>full-text retrieval"]
+        R --> F["Weighted RRF"]
+        F --> GC["Context guardrails"]
+        GC --> L["LLM<br/>Anthropic / OpenAI / offline"]
+        L --> GO["Citation + output<br/>validation"]
+    end
+    DB[("PostgreSQL<br/>+ pgvector")]
+    R --- DB
+
+    subgraph DEV["Developer agent · local only"]
+        T["Task"] --> CX["Context selection<br/>(budgeted)"]
+        CX --> P["Tool planner"]
+        P --> PO{"Policy check"}
+        PO -->|allowed| TO["Tools: read · search ·<br/>write* · run_check"]
+        TO --> TR["Run trace"]
     end
 
-    subgraph RAG["Grounded Retrieval API — hosted"]
-        client["API client"] --> api["FastAPI"]
-        api --> auth["JWT + workspace authorization"]
-        auth --> postgres[("PostgreSQL")]
-        api --> ingest["Document ingestion"]
-        ingest --> vector[("PostgreSQL + pgvector")]
-        api --> query["Query service"]
-        query --> guardIn["Input guardrails"]
-        guardIn --> retrieval["Dense + lexical retrieval"]
-        retrieval --> fusion["Weighted RRF"]
-        fusion --> guardContext["Context guardrails"]
-        guardContext --> llm["Deterministic / Anthropic / OpenAI"]
-        llm --> guardOut["Output + citation validation"]
-        guardOut --> api
-        api --> metrics["Structured logs + Prometheus"]
-    end
-
-    evals["Evaluation gates"] --> context
-    evals --> retrieval
+    E["Eval gates in CI"] -.-> R
+    E -.-> CX
 ```
 
-The two surfaces share the same engineering principles: **ground model behavior in relevant evidence, constrain capabilities outside the model, measure quality independently, require explicit operator control for mutation, verify outcomes, and make behavior observable**.
+\* writes only with `--allow-writes`. The repo-writing agent is never exposed on the hosted API.
 
-## Grounded Developer Agent
+## Try it
 
-The developer-agent side grounds model decisions in bounded repository context and policy-controlled tools. A software-engineering agent should not receive an entire large repository or unrestricted machine access. This project separates the problem into four layers.
+**Hosted:** open the **[interactive API docs](https://grounded-agent-api.vercel.app/docs)**. Main routes: `POST /v1/documents/upload`, `POST /v1/query`, `GET /v1/workspaces`, plus `/health/live`, `/health/ready` and `/metrics`.
 
-### 1. Context engineering
-
-`RepositoryContextBuilder` scans supported source/text files, ignores generated and vendor directories, ranks files against the engineering task, applies per-file bounds, and enforces a total context budget.
-
-Context selection is deterministic so it can be evaluated separately from model behavior.
-
-```text
-task
-  ↓
-candidate repository files
-  ↓
-path + content relevance scoring
-  ↓
-bounded top-k context
-  ↓
-planner
+**Locally** (Python 3.11+, PostgreSQL with pgvector)
+```bash
+make dev                 # install with dev extras
+cp .env.example .env     # offline providers by default, no API key needed
+make migrate             # create tables
+make test                # unit tests
+make eval-ci             # RAG + adversarial evaluation gates
 ```
 
-### 2. Skills
+**Run the developer agent** (read-only by default)
+```bash
+rag-agent dev-agent --repo . --task "Trace how request authentication is enforced"
 
-Reusable behavior lives under `agent_skills/`:
+# with a real model and a skill
+APP_LLM_PROVIDER=anthropic APP_LLM_MODEL=<model> \
+  rag-agent dev-agent --repo . --skill review --task "Review the auth path for security issues"
+```
 
-- `code-change.yaml` — inspect, make the smallest change, then verify
-- `debug.yaml` — reproduce/trace before editing, then rerun the failing check
-- `review.yaml` — read-only correctness/security/reliability review
+## Honest limitations
 
-Each skill carries instructions and its own tool allowlist. Adding or changing a workflow does not require changing the harness.
+- **Small CI eval sets:** the CI gates use small regression sets (3 RAG, 3 adversarial, 4 agent cases). Larger HR-policy sets (7 and 23 questions) run, but don't pass the answer-relevance gate with the offline providers yet, so they aren't in CI. On the 23-question set: recall 0.96, citation correctness 0.65.
+- **Offline providers in the demo:** the hosted API uses deterministic embeddings and generation, so it shows the pipeline, not model-quality answers.
+- **Agent sandboxing:** the agent's policy layer is defense in depth, not an OS sandbox. A hosted, write-enabled version would need ephemeral containers, network isolation and scoped credentials.
 
-### 3. Tool registry and policy
+More detail: [`docs/limitations.md`](docs/limitations.md) and the architecture decision records in [`docs/adr/`](docs/adr/).
 
-The model chooses among narrow tools:
+<details>
+<summary><strong>Optional extras: AWS Bedrock/AgentCore, gRPC, Kubernetes, Prometheus/Grafana, Terraform</strong></summary>
 
-| Tool | Purpose |
+None of these are deployed or needed to evaluate the project. All run locally without paid accounts.
+
+- **AWS Bedrock + Strands + AgentCore:** a disabled-by-default, read-only, JWT/workspace-scoped agent reference with Bedrock Guardrails config. Run `python aws_agent/demo_offline.py`. Threat model and limitations in [`aws_agent/PORTFOLIO.md`](aws_agent/PORTFOLIO.md). Not deployed to AWS.
+- **gRPC retrieval contract:** a Protocol Buffers service with deadlines and bearer metadata, on localhost only. Run `python -m grpc_demo.demo_offline`. See [`grpc_demo/retrieval.proto`](grpc_demo/retrieval.proto).
+- **Kubernetes:** kind manifests with resource limits and secret references, validated in CI. See [`k8s/README.md`](k8s/README.md).
+- **Prometheus + Grafana:** metrics for request latency, retrieval, model calls, tokens, ingestion and cache hits. See [`k8s/MONITORING.md`](k8s/MONITORING.md) and [`monitoring/`](monitoring/).
+- **Terraform + AWS SAM/Lambda:** deployment scaffolding in [`infra/`](infra/), with a GitHub OIDC workflow.
+
+</details>
+
+## Repository guide
+
+| Path | What's there |
 | --- | --- |
-| `list_files` | Inspect repository structure |
-| `read_file` | Read a repository file |
-| `search_code` | Search matching source lines |
-| `write_file` | Replace/create a file when writes are explicitly enabled |
-| `run_check` | Run approved test/lint/typecheck/build commands |
-| `finish` | Complete the run with a summary |
+| [`src/rag_agent/`](src/rag_agent/) | Retrieval, RAG service, auth, guardrails, evals, FastAPI app |
+| [`src/rag_agent/agent/`](src/rag_agent/agent/) | Developer agent: context, planner, tools, policy, skills, harness |
+| [`data/eval_datasets/`](data/eval_datasets/) | RAG quality and adversarial evaluation cases |
+| [`tests/`](tests/) | Unit and PostgreSQL integration tests |
+| [`docs/`](docs/) | Architecture, ADRs, developer-agent design, deployment, limitations |
 
-The runtime validates every request independently of the model. The policy blocks path traversal, credential-like paths, unapproved commands, oversized writes, and writes that were not explicitly enabled.
+---
 
-Commands run without a shell and receive a restricted environment so provider credentials are not automatically inherited by child processes.
-
-### 4. Trace and verification
-
-Every run records:
-
-- selected repository context;
-- planner decisions and reasons;
-- tool inputs;
-- tool success/failure;
-- policy blocks;
-- changed files; and
-- verification output.
-
-This creates an inspectable artifact for debugging agent behavior instead of treating the model as a black box.
-
-See [docs/developer-agent.md](docs/developer-agent.md) and [ADR 0008](docs/adr/0008-developer-agent-harness.md).
-
-## Local developer-agent usage
-
-Install the project:
-
-```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -e '.[dev]'
-```
-
-Deterministic mode performs a context-only dry run and requires no model API key:
-
-```bash
-rag-agent dev-agent \
-  --repo . \
-  --task "Trace how request authentication is enforced"
-```
-
-Use a configured remote model for iterative tool use:
-
-```bash
-export APP_LLM_PROVIDER=anthropic
-export APP_LLM_MODEL=<model-name>
-
-rag-agent dev-agent \
-  --repo . \
-  --skill review \
-  --task "Review the authentication path for reliability and security"
-```
-
-File mutation is disabled unless the operator opts in for that specific invocation:
-
-```bash
-rag-agent dev-agent \
-  --repo . \
-  --skill code-change \
-  --allow-writes \
-  --task "Add validation for the new field and verify the relevant tests"
-```
-
-The current policy layer is defense in depth, **not an OS-level sandbox**. A production write-enabled service should add ephemeral containers or VMs, network isolation, resource limits, scoped credentials, and stronger approval/authorization controls.
-
-## Agent evaluation
-
-Repository context quality is gated independently from the model.
-
-```bash
-python scripts/run_agent_evals.py \
-  --dataset data/agent_evals/context_selection.yaml \
-  --threshold 0.75
-```
-
-The evaluator checks whether known engineering tasks retrieve expected implementation files in the top-k context. CI publishes the resulting JSON report alongside the RAG evaluation and latency reports.
-
-This separation matters because a coding agent can fail for different reasons:
-
-```text
-wrong context
-    vs
-bad model decision
-    vs
-tool/policy failure
-    vs
-verification failure
-```
-
-Measuring those stages independently makes regressions easier to diagnose.
-
-## Grounded retrieval pipeline
-
-```text
-JWT + workspace authorization
-        ↓
-input guardrails
-        ↓
-dense retrieval + lexical retrieval
-        ↓
-weighted reciprocal-rank fusion
-        ↓
-retrieved-context guardrails
-        ↓
-LLM generation
-        ↓
-citation + output validation
-        ↓
-grounded response
-```
-
-Dense retrieval handles semantic similarity while lexical search preserves exact terms, identifiers, acronyms, and policy names.
-
-## Grounded retrieval API
-
-| Route | Purpose |
-| --- | --- |
-| `POST /v1/auth/bootstrap` | Bootstrap initial local/admin workspace when enabled |
-| `POST /v1/auth/login` | Authenticate and issue an access token |
-| `GET /v1/workspaces` | List workspaces available to the current user |
-| `POST /v1/documents/upload` | Parse, chunk, embed, and persist a document |
-| `GET /v1/documents` | List workspace documents |
-| `POST /v1/documents/{id}/reindex` | Rebuild chunks and embeddings |
-| `DELETE /v1/documents/{id}` | Delete a document and invalidate retrieval state |
-| `POST /v1/query` | Run workspace-scoped hybrid retrieval and generation |
-| `GET /health/live` | Liveness check |
-| `GET /health/ready` | Readiness check |
-| `GET /metrics` | Prometheus metrics |
-
-## CI quality gates
-
-Every pull request runs:
-
-1. Ruff linting
-2. Ruff formatting validation
-3. mypy type checking
-4. database migrations
-5. unit tests
-6. PostgreSQL/pgvector integration tests
-7. RAG quality evaluation
-8. adversarial evaluation
-9. developer-agent context evaluation
-10. latency regression benchmark
-11. dependency vulnerability scanning
-12. production Docker image build
-
-Evaluation and benchmark reports are uploaded as CI artifacts.
-
-## Observability
-
-The application uses structured JSON logging and request/run correlation context. The hosted RAG API exports Prometheus metrics for request volume, latency, retrieval, model calls, token usage, ingestion outcomes, caching, and groundedness.
-
-Developer-agent runs produce structured events for:
-
-- run start/completion;
-- selected context;
-- allowed tools;
-- planner failures;
-- each tool invocation;
-- policy blocks;
-- write activity; and
-- max-step termination.
-
-Optional LangSmith tracing can be enabled for hosted model calls by supplying the corresponding environment key.
-
-## Deployment
-
-The public RAG demo runs on Vercel Hobby with managed Neon PostgreSQL/pgvector and deterministic providers. The repository also contains:
-
-- Docker / Docker Compose
-- Terraform environment scaffolding
-- AWS Lambda/SAM deployment configuration
-- GitHub OIDC deployment workflow
-- CloudWatch logging configuration
-- Alembic database migrations
-
-The hosted instance is a demo deployment, not a production SLA.
-
-A production deployment would still need organization-specific secret management, backups, rollout/rollback controls, alerts, capacity planning, and model-provider credentials where applicable.
-
-## Technology stack
-
-**AI / retrieval**
-- hybrid dense + lexical retrieval
-- pgvector
-- Anthropic and OpenAI model adapters
-- deterministic providers for reproducible CI
-- deterministic first-pass prompt/context screening plus output/citation validation
-- RAG and developer-agent evaluations
-
-**Backend**
-- Python 3.11+
-- FastAPI
-- Pydantic
-- SQLAlchemy
-- PostgreSQL 16
-- Alembic
-
-**Agent platform**
-- repository context selection
-- JSON tool planning
-- registry-backed tools
-- declarative skills
-- policy-controlled execution
-- structured run traces
-
-**Delivery / operations**
-- Docker and Docker Compose
-- GitHub Actions
-- Terraform
-- AWS SAM / Lambda
-- Prometheus and Grafana
-- structured JSON logging
-
-## Repository map
-
-```text
-agent_skills/                 reusable developer-agent skills
-data/
-  agent_evals/                developer-agent context evaluation cases
-  eval_datasets/              RAG quality/adversarial datasets
-docs/
-  adr/                        architecture decisions
-  developer-agent.md          developer-agent design and safety model
-infra/                        Terraform and AWS deployment assets
-monitoring/                   Prometheus and Grafana configuration
-scripts/
-  run_agent_evals.py          developer-agent context quality gate
-  run_evals.py                RAG evaluation runner
-src/rag_agent/
-  agent/                      context, planner, tools, policy, skills, harness
-  api/                        FastAPI surface and metrics
-  evals/                      RAG evaluators/scorers
-  guardrails/                 input/context/output controls
-  retrieval.py                hybrid retrieval
-  service.py                  RAG orchestration
-tests/                        unit and integration coverage
-```
-
-## Design principles
-
-- **Context is a system component.** Measure what the model sees instead of treating prompt assembly as incidental.
-- **Models propose; policy decides.** Tool access is enforced outside the LLM.
-- **Guardrails are layered, not magical.** Regex-based prompt-injection checks are deterministic and testable, but bypassable; authorization, tool policy, sandboxing, and output validation carry the real security boundary.
-- **Verification is part of the workflow.** A code change is not complete merely because text was generated.
-- **AI quality needs evals.** Deterministic gates catch regressions before deployment.
-- **Observability applies to agent behavior too.** Decisions, tools, failures, and outcomes should be inspectable.
-- **Claims should match deployed reality.** Hosted, local, implemented, and planned components are described separately.
+Built by **Farnaz Nasehi** · [LinkedIn](https://www.linkedin.com/in/farnaz-nasehi/) · [GitHub](https://github.com/FarnazNK)
