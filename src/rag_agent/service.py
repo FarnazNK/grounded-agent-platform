@@ -35,6 +35,7 @@ from rag_agent.guardrails.output_filters import SourceCitationChecker
 from rag_agent.llm import LLMProvider, build_llm_provider
 from rag_agent.observability import get_logger
 from rag_agent.parser import chunk_text, parse_document_bytes
+from rag_agent.rerank import Reranker, build_reranker
 from rag_agent.retrieval import HybridRetriever
 from rag_agent.schemas import (
     ChunkRecord,
@@ -86,6 +87,7 @@ class RAGService:
         settings: Settings | None = None,
         embedding_service: EmbeddingService | None = None,
         llm_provider: LLMProvider | None = None,
+        reranker: Reranker | None = None,
         retrieval_cache: TTLCache[str, QueryResult] | None = None,
         rate_limiter: SlidingWindowRateLimiter | None = None,
         now: Callable[[], datetime] | None = None,
@@ -94,7 +96,10 @@ class RAGService:
         self.store = store
         self.embeddings = embedding_service or build_embedding_service(self.settings)
         self.llm = llm_provider or build_llm_provider(self.settings)
-        self.retriever = HybridRetriever(store, self.settings)
+        self.reranker = (
+            reranker if reranker is not None else build_reranker(self.settings, self.llm)
+        )
+        self.retriever = HybridRetriever(store, self.settings, self.reranker)
         self.retrieval_cache = retrieval_cache or TTLCache[str, QueryResult](
             self.settings.retrieval_cache_ttl_seconds
         )
@@ -355,7 +360,8 @@ class RAGService:
             raise
         cache_key = (
             f"{workspace.id}:{workspace.index_version}:"
-            f"{sanitized_query}:{self.settings.top_k_final}"
+            f"{sanitized_query}:{self.settings.top_k_final}:"
+            f"{self.reranker.name if self.reranker else 'none'}"
         )
         cached = self.retrieval_cache.get(cache_key)
         if cached is not None:
@@ -374,6 +380,10 @@ class RAGService:
                 safe_chunks.append(chunk)
         chunks = safe_chunks
         llm_result = self.llm.answer_question(sanitized_query, chunks)
+        usage = llm_result.usage.model_copy()
+        usage.prompt_tokens += int(retrieval_metrics["rerank_prompt_tokens"])
+        usage.completion_tokens += int(retrieval_metrics["rerank_completion_tokens"])
+        usage.total_tokens = usage.prompt_tokens + usage.completion_tokens
         output_text, _ = apply_guardrails(
             llm_result.text,
             [
@@ -392,12 +402,13 @@ class RAGService:
             answer=output_text,
             citations=citations,
             chunks=chunks,
-            usage=llm_result.usage,
+            usage=usage,
             latency=LatencyBreakdown(
                 total_ms=(time.perf_counter() - start) * 1000,
                 retrieval_ms=retrieval_metrics["dense_ms"] + retrieval_metrics["sparse_ms"],
                 llm_ms=llm_result.latency_ms,
                 db_ms=retrieval_metrics["db_ms"],
+                rerank_ms=retrieval_metrics["rerank_ms"],
             ),
             cached=False,
             grounded=(

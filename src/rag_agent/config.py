@@ -45,6 +45,12 @@ class Settings(BaseSettings):
     dense_retrieval_weight: float = Field(default=0.8, gt=0.0, le=5.0)
     sparse_retrieval_weight: float = Field(default=1.2, gt=0.0, le=5.0)
     min_fused_score: float = Field(default=0.15, ge=0.0, le=1.0)
+    # Second-stage reranking of the fused candidates (see docs/adr/0006-reranking.md).
+    # "lexical" is deterministic and free; "llm" uses the configured LLM provider.
+    reranker: Literal["none", "lexical", "llm"] = "lexical"
+    rerank_candidates: int = Field(default=12, ge=1, le=50)
+    rerank_fused_weight: float = Field(default=0.3, ge=0.0, le=1.0)
+    rerank_title_weight: float = Field(default=1.0, ge=0.0, le=5.0)
     chunk_size_words: int = Field(default=180, ge=20, le=2000)
     chunk_overlap_words: int = Field(default=30, ge=0, le=1000)
 
@@ -90,6 +96,8 @@ class Settings(BaseSettings):
                 )
             if self.enable_bootstrap_admin:
                 raise ValueError("bootstrap admin must be disabled in staging/production")
+        if self.reranker == "llm" and self.llm_provider == "deterministic":
+            raise ValueError("APP_RERANKER=llm needs a remote APP_LLM_PROVIDER")
         if self.llm_provider != "deterministic" and self.llm_model == "deterministic-rag":
             raise ValueError("set APP_LLM_MODEL when using a remote LLM provider")
         if (

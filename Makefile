@@ -1,4 +1,4 @@
-.PHONY: install dev lint typecheck test test-unit test-integration eval eval-adversarial eval-ci security docker-build docker-up docker-down migrate benchmark smoke clean build-RagAgentApi
+.PHONY: install dev lint typecheck test test-unit test-integration eval eval-adversarial eval-hr eval-ci model-eval-offline security docker-build docker-up docker-down migrate benchmark smoke clean build-RagAgentApi
 
 install:
 	pip install -e .
@@ -26,7 +26,16 @@ eval:
 eval-adversarial:
 	python scripts/run_evals.py --dataset data/eval_datasets/adversarial.yaml --out benchmarks/results/adversarial_eval_report.json
 
-eval-ci: eval eval-adversarial
+eval-hr:
+	python scripts/run_evals.py --dataset data/eval_datasets/hr_full.yaml --out benchmarks/results/hr_full_eval_report.json
+	python scripts/run_evals.py --dataset data/eval_datasets/hr_holdout.yaml --out benchmarks/results/hr_holdout_eval_report.json
+
+eval-ci: eval eval-adversarial eval-hr
+
+# Reranker comparison with deterministic answers. For a real model, set
+# APP_LLM_PROVIDER/APP_LLM_MODEL and run scripts/run_model_eval.py --judge.
+model-eval-offline:
+	python scripts/run_model_eval.py --offline
 
 security:
 	pip-audit

@@ -56,6 +56,7 @@ class LatencyBreakdown(BaseModel):
     retrieval_ms: float = 0.0
     llm_ms: float = 0.0
     db_ms: float = 0.0
+    rerank_ms: float = 0.0
 
 
 class QueryResult(BaseModel):

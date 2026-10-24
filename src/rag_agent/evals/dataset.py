@@ -12,6 +12,8 @@ class EvalCase(BaseModel):
     expected_sources: list[str] = Field(default_factory=list)
     expected_contains: list[str] = Field(default_factory=list)
     expected_citations: list[str] = Field(default_factory=list)
+    # Plain-language description of a correct answer, graded by the LLM judge.
+    judge_criteria: str = ""
     tags: list[str] = Field(default_factory=list)
 
 

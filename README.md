@@ -8,9 +8,9 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![pgvector](https://img.shields.io/badge/PostgreSQL-pgvector-4169E1?logo=postgresql&logoColor=white)
 
-**[📘 Live API docs](https://grounded-agent-api.vercel.app/docs)** · **[💚 Health](https://grounded-agent-api.vercel.app/health/ready)** · **[🧠 Core code](src/rag_agent/)** · **[📊 Evaluations](scripts/)**
+**[🖥️ Live demo](https://grounded-agent-web.vercel.app)** · **[📘 Live API docs](https://grounded-agent-api.vercel.app/docs)** · **[💚 Health](https://grounded-agent-api.vercel.app/health/ready)** · **[🧠 Core code](src/rag_agent/)** · **[📊 Evaluations](scripts/)**
 
-> API-only project: there's no web UI. The live link opens interactive Swagger docs.
+> **Two live pieces.** The [web demo](https://grounded-agent-web.vercel.app) (React + TypeScript, in [`frontend/`](frontend/)) traces every question step by step: guardrails, dense and lexical search, rank fusion, grounding and citation checks. It runs a browser port of the backend's deterministic pipeline, so it needs no sign-in and makes no API calls. The [hosted API](https://grounded-agent-api.vercel.app/docs) is the real Python backend.
 
 ---
 
@@ -19,17 +19,31 @@
 | | |
 | --- | --- |
 | **What it is** | (1) A RAG API: upload documents per workspace, ask questions, get answers with checked citations. (2) A developer agent that reads code, proposes changes and runs tests, within strict rules. |
-| **AI techniques** | Hybrid retrieval (pgvector + full-text) with reciprocal-rank fusion, citation validation, input/context/output guardrails, tool-calling agent loop, reusable skills |
+| **AI techniques** | Hybrid retrieval (pgvector + full-text) with reciprocal-rank fusion, second-stage reranking (lexical by default, LLM optional), citation validation, input/context/output guardrails, LLM-as-judge evaluation, tool-calling agent loop, reusable skills |
 | **Backend** | Python, FastAPI, Pydantic, SQLAlchemy, PostgreSQL 16 + pgvector, Alembic, JWT |
+| **Frontend** | React 18, TypeScript, Vite: a public demo that visualizes each pipeline step |
 | **Models** | Anthropic or OpenAI adapters, plus deterministic offline providers for reproducible CI |
-| **Quality** | 101 unit tests + PostgreSQL integration tests, RAG and adversarial eval gates, agent context eval, p95 latency gate, mypy, CodeQL, pip-audit |
-| **Deployed on** | Vercel with Neon PostgreSQL/pgvector (RAG API only) |
+| **Quality** | 129 unit tests + PostgreSQL integration tests, RAG eval gates on 66 questions (including a 40-question held-out set), adversarial gate, agent context eval, p95 latency gate, mypy, CodeQL, pip-audit |
+| **Deployed on** | Vercel: RAG API with Neon PostgreSQL/pgvector, plus the static web demo |
 
 ## What I built
 
 ### 🔎 Hybrid retrieval with checked citations
-Dense search (pgvector) finds meaning; full-text search catches exact terms like policy names, acronyms and IDs. The two rankings are merged with **weighted reciprocal-rank fusion**. Before an answer goes out, its citations are **validated against the retrieved sources**, and PII filters run on the output. Retrieval and embedding caches invalidate automatically when a document is re-indexed.
+Dense search (pgvector) finds meaning; full-text search catches exact terms like policy names, acronyms and IDs. The two rankings are merged with **weighted reciprocal-rank fusion**, then a **second-stage reranker** reorders the short list before the answer is built. Before an answer goes out, its citations are **validated against the retrieved sources**, and PII filters run on the output. Retrieval and embedding caches invalidate automatically when a document is re-indexed.
 → [`src/rag_agent/retrieval.py`](src/rag_agent/retrieval.py), [`src/rag_agent/service.py`](src/rag_agent/service.py)
+
+### 🔁 Reranking, measured before and after
+Per-case eval results showed the real problem: the right document was almost always *retrieved*, but often ranked 2nd or 3rd, so the answer cited the wrong source. A deterministic **lexical reranker** (stemmed query coverage, rarer terms weighted, file-name matches) now reorders the candidates, with an **LLM reranker** available as an option. To check it isn't overfit, I wrote a **40-question held-out set** after tuning, against documents the tuning set doesn't cover.
+
+| Answerable questions (offline) | No reranker | Lexical reranker |
+| --- | ---: | ---: |
+| Held-out set: citation correctness | 0.60 | **0.86** |
+| Held-out set: MRR | 0.74 | **0.91** |
+| Tuning set: citation correctness | 0.56 | **0.94** |
+| Added p95 latency | | ~2-4 ms |
+
+The held-out gain is the honest number. These runs use deterministic answers, so they measure ranking and citations, not answer quality. **[`scripts/run_model_eval.py`](scripts/run_model_eval.py)** and a manual **[`model-eval` workflow](.github/workflows/model-eval.yml)** repeat the comparison with a real model (Anthropic or OpenAI), add the LLM reranker, and grade every answer with an **LLM judge** against criteria written per question. Decision record: [ADR 0009](docs/adr/0009-lexical-reranking-default.md).
+→ [`src/rag_agent/rerank.py`](src/rag_agent/rerank.py), [`src/rag_agent/evals/judge.py`](src/rag_agent/evals/judge.py), [`data/eval_datasets/hr_holdout.yaml`](data/eval_datasets/hr_holdout.yaml)
 
 ### 🏢 Multi-tenant by design
 Organizations → workspaces → viewer/editor/admin memberships. Every upload, re-index, delete and query is **scoped to a workspace the user belongs to**. The app refuses to start in staging or production if the admin-bootstrap shortcut is switched on.
@@ -44,7 +58,7 @@ Every pull request must pass:
 
 | Gate | What it checks | Result on the CI sets |
 | --- | --- | --- |
-| RAG quality | Right source retrieved, answer grounded, citations correct | recall 1.0, citation correctness 1.0, hallucination 0.0 |
+| RAG quality (3 + 23 + 40 questions) | Right source retrieved, answer grounded, citations correct | core set 1.0; HR sets recall 1.0 / 0.97, citation correctness 0.94 / 0.86 |
 | Adversarial | Prompt-injection and unsafe requests get blocked | all blocked |
 | Agent context | Agent selects the correct files for known tasks (top-8) | 1.0 (threshold 0.75) |
 | Latency | p95 request latency on the benchmark | ~4 ms (limit 500 ms) |
@@ -65,7 +79,8 @@ flowchart LR
         A --> GI["Input guardrails"]
         GI --> R["Dense (pgvector) +<br/>full-text retrieval"]
         R --> F["Weighted RRF"]
-        F --> GC["Context guardrails"]
+        F --> RR["Reranker<br/>lexical / LLM"]
+        RR --> GC["Context guardrails"]
         GC --> L["LLM<br/>Anthropic / OpenAI / offline"]
         L --> GO["Citation + output<br/>validation"]
     end
@@ -96,8 +111,17 @@ make dev                 # install with dev extras
 cp .env.example .env     # offline providers by default, no API key needed
 make migrate             # create tables
 make test                # unit tests
-make eval-ci             # RAG + adversarial evaluation gates
+make eval-ci             # RAG (66 questions) + adversarial evaluation gates
 ```
+
+**Run a real-model eval** (compares rerankers, grades answers with an LLM judge)
+```bash
+APP_LLM_PROVIDER=anthropic APP_LLM_MODEL=<model> \
+APP_JUDGE_PROVIDER=anthropic APP_JUDGE_MODEL=<judge-model> \
+  python scripts/run_model_eval.py --rerankers none lexical llm --judge \
+    --input-price <usd-per-1M-in> --output-price <usd-per-1M-out>
+```
+Or run the **model-eval** workflow from the Actions tab after adding an `ANTHROPIC_API_KEY` or `OPENAI_API_KEY` secret. The report lands in the run summary.
 
 **Run the developer agent** (read-only by default)
 ```bash
@@ -110,7 +134,8 @@ APP_LLM_PROVIDER=anthropic APP_LLM_MODEL=<model> \
 
 ## Honest limitations
 
-- **Small CI eval sets:** the CI gates use small regression sets (3 RAG, 3 adversarial, 4 agent cases). Larger HR-policy sets (7 and 23 questions) run, but don't pass the answer-relevance gate with the offline providers yet, so they aren't in CI. On the 23-question set: recall 0.96, citation correctness 0.65.
+- **Offline vs. real-model evals:** CI runs deterministic answers, so it gates retrieval, ranking and citations, not answer quality. Answer quality comes from the real-model eval with an LLM judge, which costs API credits and runs manually; its results aren't published here yet.
+- **Abstention:** the offline answer provider can't decline, so it fails the questions whose answer isn't in the corpus. Whether a real model correctly says "I don't know" is measured by the real-model eval.
 - **Offline providers in the demo:** the hosted API uses deterministic embeddings and generation, so it shows the pipeline, not model-quality answers.
 - **Agent sandboxing:** the agent's policy layer is defense in depth, not an OS sandbox. A hosted, write-enabled version would need ephemeral containers, network isolation and scoped credentials.
 
@@ -135,6 +160,7 @@ None of these are deployed or needed to evaluate the project. All run locally wi
 | --- | --- |
 | [`src/rag_agent/`](src/rag_agent/) | Retrieval, RAG service, auth, guardrails, evals, FastAPI app |
 | [`src/rag_agent/agent/`](src/rag_agent/agent/) | Developer agent: context, planner, tools, policy, skills, harness |
+| [`frontend/`](frontend/) | React + TypeScript web demo that traces the RAG pipeline |
 | [`data/eval_datasets/`](data/eval_datasets/) | RAG quality and adversarial evaluation cases |
 | [`tests/`](tests/) | Unit and PostgreSQL integration tests |
 | [`docs/`](docs/) | Architecture, ADRs, developer-agent design, deployment, limitations |
