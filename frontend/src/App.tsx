@@ -27,14 +27,14 @@ function Pipeline({ result }: { result: QueryResult }) {
       </ol>
       {result.candidates.length > 0 && (
         <div className="candidates">
-          <div className="candidates-title">Retrieval candidates <small>— how the two searches were fused</small></div>
-          <div className="cand-row cand-head"><span>CHUNK</span><span>DENSE RANK</span><span>LEXICAL RANK</span><span>FUSED SCORE</span></div>
+          <div className="candidates-title">Retrieval candidates <small>— fused from both searches, then reranked</small></div>
+          <div className="cand-row cand-head"><span>CHUNK</span><span>DENSE RANK</span><span>LEXICAL RANK</span><span>RERANK SCORE</span></div>
           {result.candidates.slice(0, 8).map(c => (
             <div className={"cand-row" + (c.selected ? " selected" : "")} key={c.chunk_id}>
               <span className="cand-name">{c.selected ? "✓ " : ""}{c.source_name}<small>{c.content.slice(0, 70)}…</small></span>
               <span>{c.dense_rank ?? "—"}</span>
               <span>{c.lexical_rank ?? "—"}</span>
-              <span><span className="bar"><span style={{ width: `${Math.round(c.fused_score * 100)}%` }} /></span>{c.fused_score.toFixed(2)}</span>
+              <span title={`Fused score ${c.fused_score.toFixed(2)}`}><span className="bar"><span style={{ width: `${Math.round((c.rerank_score ?? c.fused_score) * 100)}%` }} /></span>{(c.rerank_score ?? c.fused_score).toFixed(2)}</span>
             </div>
           ))}
         </div>
@@ -49,6 +49,7 @@ function HowItWorks() {
     ["Authorization", "JWT auth plus workspace membership. Every query and document is scoped to one tenant's workspace.", "auth.py"],
     ["Hybrid retrieval", `pgvector dense search and PostgreSQL full-text search run side by side (top ${SETTINGS.top_k_dense} each).`, "retrieval.py"],
     ["Rank fusion", `Weighted reciprocal-rank fusion (dense ${SETTINGS.dense_weight}, lexical ${SETTINGS.sparse_weight}, k=${SETTINGS.rrf_k}) merges both lists.`, "retrieval.py"],
+    ["Reranking", `A lexical reranker reorders the top ${SETTINGS.rerank_candidates} candidates by query coverage before ${SETTINGS.top_k_final} are kept. An LLM reranker is optional.`, "rerank.py"],
     ["Generation", "Anthropic, OpenAI or a deterministic provider writes an answer from the retrieved context only.", "llm.py"],
     ["Output guardrails", "Citation check drops sources that weren't retrieved; PII in the answer is redacted.", "guardrails/output_filters.py"],
   ];
@@ -84,7 +85,7 @@ function HowItWorks() {
       </div>
 
       <div className="demo-note">
-        <strong>What this demo runs:</strong> a browser port of the backend's deterministic CI mode, with the same guardrail patterns, the same fusion formula and weights, and a hashed-token embedding. The hosted backend swaps in pgvector, PostgreSQL full-text search and an LLM provider. <a href={REPO_URL} target="_blank" rel="noreferrer">Read the source →</a>
+        <strong>What this demo runs:</strong> a browser port of the backend's deterministic CI mode, with the same guardrail patterns, the same fusion formula and weights, the same lexical reranker, and a hashed-token embedding. The hosted backend swaps in pgvector, PostgreSQL full-text search and an LLM provider. <a href={REPO_URL} target="_blank" rel="noreferrer">Read the source →</a>
       </div>
     </section>
   );
@@ -145,7 +146,7 @@ export default function App() {
               {history.length === 0 ? <div className="welcome">
                 <div className="welcome-symbol">✳</div><span className="eyebrow">SEE EVERY STEP OF THE PIPELINE</span>
                 <h1>Ask a question, watch it flow</h1>
-                <p>Each answer shows the full workflow: guardrails, hybrid search, rank fusion, grounding and output checks. Try a normal question, one that touches personal data, and a prompt-injection attempt.</p>
+                <p>Each answer shows the full workflow: guardrails, hybrid search, rank fusion, reranking, grounding and output checks. Try a normal question, one that touches personal data, and a prompt-injection attempt.</p>
                 <div className="suggestions">
                   {SUGGESTIONS.map(s => <button key={s} onClick={() => send(s)}>{s} <span>↗</span></button>)}
                 </div>

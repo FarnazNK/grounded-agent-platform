@@ -14,7 +14,7 @@ export type DemoDocument = {
 
 export type Chunk = { chunk_id: string; source_name: string; content: string };
 
-export type Candidate = Chunk & { dense_rank?: number; lexical_rank?: number; vector_score?: number; lexical_score?: number; fused_score: number; selected: boolean };
+export type Candidate = Chunk & { dense_rank?: number; lexical_rank?: number; vector_score?: number; lexical_score?: number; fused_score: number; rerank_score?: number; selected: boolean };
 
 export type StepStatus = "pass" | "block" | "sanitize" | "info";
 export type Step = { id: string; title: string; status: StepStatus; detail: string; ms: number; code: string };
@@ -32,7 +32,7 @@ export type QueryResult = {
 };
 
 // Same defaults as src/rag_agent/config.py
-export const SETTINGS = { top_k_dense: 6, top_k_sparse: 6, top_k_final: 4, dense_weight: 0.8, sparse_weight: 1.2, min_fused_score: 0.15, rrf_k: 60, dimensions: 256 };
+export const SETTINGS = { top_k_dense: 6, top_k_sparse: 6, top_k_final: 4, dense_weight: 0.8, sparse_weight: 1.2, min_fused_score: 0.15, rrf_k: 60, dimensions: 256, rerank_candidates: 12, rerank_fused_weight: 0.3, rerank_title_weight: 1.0 };
 
 const doc = (id: string, source_name: string, text: string): DemoDocument => ({
   id, source_name, status: "ready", file_size: new Blob([text]).size, updated_at: "2026-10-24T00:00:00Z", text: text.trim(),
@@ -150,6 +150,42 @@ function bm25(terms: string[], all: Passage[]) {
   });
 }
 
+// ---------------------------------------------------------------- reranking
+// Ported from src/rag_agent/rerank.py (LexicalReranker): stemmed query coverage,
+// rarer terms weighted, file-name matches boosted, blended with the fused score.
+const QUERY_STOP = new Set("a an and are as at be by for from has have i in is it its of on or that the this to was with about into than then them they these those am do does did done my me mine we our ours us you your get gets got much many can could would should will being been here there how what when where which who why".split(" "));
+function stem(term: string): string {
+  if (term.length <= 3 || /^\d+$/.test(term)) return term;
+  if (term.endsWith("ies")) term = term.slice(0, -3) + "y";
+  else if (term.endsWith("s") && !term.endsWith("ss")) term = term.slice(0, -1);
+  for (const suffix of ["ing", "ed"]) {
+    if (term.endsWith(suffix) && term.length - suffix.length >= 4) { term = term.slice(0, -suffix.length); break; }
+  }
+  if (term.endsWith("e") && term.length > 4) term = term.slice(0, -1);
+  return term;
+}
+const rerankTerms = (text: string) =>
+  (text.toLowerCase().match(/[a-z0-9]+/g) || []).filter(t => !QUERY_STOP.has(t) && t.length > 1).map(stem);
+const titleTerms = (source: string) => new Set(rerankTerms(source.replace(/\.[a-z0-9]+$/i, "").replace(/[_\-.]+/g, " ")));
+
+function rerank(question: string, candidates: Candidate[]): Candidate[] {
+  const q = [...new Set(rerankTerms(question))];
+  if (!q.length || !candidates.length) return candidates;
+  const bodies = candidates.map(c => new Set(rerankTerms(c.content)));
+  const titles = candidates.map(c => titleTerms(c.source_name));
+  const n = candidates.length;
+  const idf = new Map(q.map(t => [t, Math.log(1 + n / (1 + bodies.filter((b, i) => b.has(t) || titles[i].has(t)).length))]));
+  const totalIdf = [...idf.values()].reduce((a, b) => a + b, 0) || 1;
+  const w = SETTINGS.rerank_title_weight;
+  const coverage = candidates.map((_, i) => [...idf].reduce((sum, [t, weight]) => sum + weight * (+bodies[i].has(t) + w * +titles[i].has(t)), 0) / (totalIdf * (1 + w)));
+  const maxFused = Math.max(...candidates.map(c => c.fused_score)) || 1;
+  const maxCov = Math.max(...coverage) || 1;
+  const a = SETTINGS.rerank_fused_weight;
+  return candidates
+    .map((c, i) => ({ ...c, rerank_score: a * (c.fused_score / maxFused) + (1 - a) * (coverage[i] / maxCov) }))
+    .sort((x, y) => (y.rerank_score ?? 0) - (x.rerank_score ?? 0));
+}
+
 // ---------------------------------------------------------------- pipeline
 export function runPipeline(rawQuestion: string, docs: DemoDocument[]): QueryResult {
   const t0 = performance.now();
@@ -178,10 +214,12 @@ export function runPipeline(rawQuestion: string, docs: DemoDocument[]): QueryRes
   const qvec = embed(terms);
   step({ id: "embed", title: "Embed the question", status: "info", code: "embeddings.py", detail: `${terms.length} terms → ${SETTINGS.dimensions}-dimension hashed-token vector. Search space: ${all.length} chunks from ${docs.length} documents.` });
 
-  const dense = all.map(p => ({ p, score: cosine(qvec, p.vector) })).filter(s => s.score > 0).sort((a, b) => b.score - a.score).slice(0, SETTINGS.top_k_dense);
+  // Wider pools feed the reranker, as in retrieval.py.
+  const pool = Math.max(SETTINGS.top_k_dense, SETTINGS.rerank_candidates);
+  const dense = all.map(p => ({ p, score: cosine(qvec, p.vector) })).filter(s => s.score > 0).sort((a, b) => b.score - a.score).slice(0, pool);
   step({ id: "dense", title: "Dense vector search", status: "info", code: "postgres_store.py · pgvector", detail: `Top ${dense.length} chunks by cosine similarity.` });
 
-  const lexical = bm25(terms, all).filter(s => s.score > 0).sort((a, b) => b.score - a.score).slice(0, SETTINGS.top_k_sparse);
+  const lexical = bm25(terms, all).filter(s => s.score > 0).sort((a, b) => b.score - a.score).slice(0, Math.max(SETTINGS.top_k_sparse, SETTINGS.rerank_candidates));
   step({ id: "lexical", title: "Lexical full-text search", status: "info", code: "postgres_store.py · full-text", detail: `${lexical.length} chunks contain question terms (BM25 ranking).` });
 
   // 4. Weighted reciprocal-rank fusion — same formula as retrieval.py
@@ -195,11 +233,18 @@ export function runPipeline(rawQuestion: string, docs: DemoDocument[]): QueryRes
   add(dense, SETTINGS.dense_weight, "dense");
   add(lexical, SETTINGS.sparse_weight, "lexical");
   const max = Math.max(0, ...[...fused.values()].map(c => c.fused_score));
-  const candidates = [...fused.values()].map(c => ({ ...c, fused_score: max ? c.fused_score / max : 0 })).sort((a, b) => b.fused_score - a.fused_score);
-  const kept = candidates.filter(c => c.fused_score >= SETTINGS.min_fused_score).slice(0, SETTINGS.top_k_final);
-  step({ id: "fusion", title: "Reciprocal-rank fusion", status: "info", code: "retrieval.py", detail: `Merged both lists with weights dense ${SETTINGS.dense_weight} / lexical ${SETTINGS.sparse_weight}, k=${SETTINGS.rrf_k}. Kept top ${kept.length} with fused score ≥ ${SETTINGS.min_fused_score}.` });
+  const fusedList = [...fused.values()].map(c => ({ ...c, fused_score: max ? c.fused_score / max : 0 })).sort((a, b) => b.fused_score - a.fused_score);
+  const eligible = fusedList.filter(c => c.fused_score >= SETTINGS.min_fused_score);
+  step({ id: "fusion", title: "Reciprocal-rank fusion", status: "info", code: "retrieval.py", detail: `Merged both lists with weights dense ${SETTINGS.dense_weight} / lexical ${SETTINGS.sparse_weight}, k=${SETTINGS.rrf_k}. ${eligible.length} candidates have a fused score ≥ ${SETTINGS.min_fused_score}.` });
 
-  // 5. Grounding check: only answer from passages that share terms with the question
+  // 5. Rerank the short list, then keep the top results
+  const reranked = rerank(question, eligible.slice(0, SETTINGS.rerank_candidates));
+  const kept = reranked.slice(0, SETTINGS.top_k_final);
+  const moved = kept.filter((c, i) => fusedList.findIndex(f => f.chunk_id === c.chunk_id) !== i).length;
+  step({ id: "rerank", title: "Rerank candidates", status: "info", code: "rerank.py", detail: `Reordered ${reranked.length} candidates by how much of the question each covers (stemmed terms, rarer words and file-name matches count more), blended with the fused score. ${moved ? `${moved} of the top ${kept.length} changed position.` : "Top order unchanged."} Kept ${kept.length}.` });
+  const candidates: Candidate[] = [...reranked, ...fusedList.filter(c => !reranked.some(r => r.chunk_id === c.chunk_id))];
+
+  // 6. Grounding check: only answer from passages that share terms with the question
   const best = lexical[0]?.score ?? 0;
   const context = kept.filter(c => (c.lexical_score ?? 0) >= Math.max(0.8, best * 0.6)).slice(0, 3);
   context.forEach(c => { const x = candidates.find(y => y.chunk_id === c.chunk_id); if (x) x.selected = true; });
@@ -209,11 +254,11 @@ export function runPipeline(rawQuestion: string, docs: DemoDocument[]): QueryRes
   }
   step({ id: "context", title: "Grounding check", status: "pass", code: "service.py", detail: `${context.length} chunk${context.length > 1 ? "s" : ""} selected as context for the answer.` });
 
-  // 6. Generate (deterministic extractive generator, as in the backend's CI mode)
+  // 7. Generate (deterministic extractive generator, as in the backend's CI mode)
   const draft = context.map(c => `${c.content} [source: ${c.source_name}]`).join("\n\n");
   step({ id: "generate", title: "Generate answer", status: "info", code: "llm.py · deterministic provider", detail: "Builds the answer from the selected passages and cites each one. With a real LLM configured, this is where the model writes the answer." });
 
-  // 7. Output guardrails
+  // 8. Output guardrails
   const valid = new Set(context.map(c => c.source_name));
   const cited = [...draft.matchAll(/\[source:\s*([^\]]+)\]/gi)].map(m => m[1].trim());
   const invalid = cited.filter(s => !valid.has(s));
