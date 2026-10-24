@@ -1,4 +1,5 @@
 name: hr_full
+corpus_dir: data/sample_corpus_extended
 description: >
   Extended eval suite for the 60-doc HR/IT/security/finance corpus. Designed
   to exercise hybrid retrieval (queries with acronyms, exact phrases, and
