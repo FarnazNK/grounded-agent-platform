@@ -1,0 +1,17 @@
+{
+  "framework": "vite",
+  "rewrites": [
+    {
+      "source": "/v1/:path*",
+      "destination": "https://grounded-agent-api.vercel.app/v1/:path*"
+    },
+    {
+      "source": "/health/:path*",
+      "destination": "https://grounded-agent-api.vercel.app/health/:path*"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/index.html"
+    }
+  ]
+}
