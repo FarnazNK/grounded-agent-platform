@@ -8,9 +8,9 @@
 ![FastAPI](https://img.shields.io/badge/FastAPI-009688?logo=fastapi&logoColor=white)
 ![pgvector](https://img.shields.io/badge/PostgreSQL-pgvector-4169E1?logo=postgresql&logoColor=white)
 
-**[📘 Live API docs](https://grounded-agent-api.vercel.app/docs)** · **[💚 Health](https://grounded-agent-api.vercel.app/health/ready)** · **[🧠 Core code](src/rag_agent/)** · **[📊 Evaluations](scripts/)**
+**[🖥️ Live demo](https://grounded-agent-web.vercel.app)** · **[📘 Live API docs](https://grounded-agent-api.vercel.app/docs)** · **[💚 Health](https://grounded-agent-api.vercel.app/health/ready)** · **[🧠 Core code](src/rag_agent/)** · **[📊 Evaluations](scripts/)**
 
-> API-only project: there's no web UI. The live link opens interactive Swagger docs.
+> **Two ways to look at it.** The **live demo** is a React/TypeScript app that walks each question through the whole pipeline (guardrails, workspace scoping, hybrid search, rank fusion, grounding, citation validation, PII redaction) with timings, running a browser port of the backend's deterministic mode, so it needs no sign-in and never reaches the backend. The **live API docs** open the real FastAPI service in Swagger.
 
 ---
 
@@ -21,9 +21,10 @@
 | **What it is** | (1) A RAG API: upload documents per workspace, ask questions, get answers with checked citations. (2) A developer agent that reads code, proposes changes and runs tests, within strict rules. |
 | **AI techniques** | Hybrid retrieval (pgvector + full-text) with reciprocal-rank fusion, citation validation, input/context/output guardrails, tool-calling agent loop, reusable skills |
 | **Backend** | Python, FastAPI, Pydantic, SQLAlchemy, PostgreSQL 16 + pgvector, Alembic, JWT |
+| **Frontend** | React, TypeScript, Vite: an interactive pipeline walkthrough, sandboxed by a strict Content-Security-Policy |
 | **Models** | Anthropic or OpenAI adapters, plus deterministic offline providers for reproducible CI |
 | **Quality** | 101 unit tests + PostgreSQL integration tests, RAG and adversarial eval gates, agent context eval, p95 latency gate, mypy, CodeQL, pip-audit |
-| **Deployed on** | Vercel with Neon PostgreSQL/pgvector (RAG API only) |
+| **Deployed on** | Vercel: the API with Neon PostgreSQL/pgvector, plus the demo front end. The developer agent runs locally only. |
 
 ## What I built
 
@@ -88,7 +89,9 @@ flowchart LR
 
 ## Try it
 
-**Hosted:** open the **[interactive API docs](https://grounded-agent-api.vercel.app/docs)**. Main routes: `POST /v1/documents/upload`, `POST /v1/query`, `GET /v1/workspaces`, plus `/health/live`, `/health/ready` and `/metrics`.
+**In the browser:** open the **[live demo](https://grounded-agent-web.vercel.app)**, ask a question about the sample documents or add your own `.txt`/`.md` file (read in the browser, never uploaded), and watch each pipeline stage.
+
+**Hosted API:** open the **[interactive API docs](https://grounded-agent-api.vercel.app/docs)**. Main routes: `POST /v1/documents/upload`, `POST /v1/query`, `GET /v1/workspaces`, plus `/health/live`, `/health/ready` and `/metrics`.
 
 **Locally** (Python 3.11+, PostgreSQL with pgvector)
 ```bash
@@ -135,6 +138,7 @@ None of these are deployed or needed to evaluate the project. All run locally wi
 | --- | --- |
 | [`src/rag_agent/`](src/rag_agent/) | Retrieval, RAG service, auth, guardrails, evals, FastAPI app |
 | [`src/rag_agent/agent/`](src/rag_agent/agent/) | Developer agent: context, planner, tools, policy, skills, harness |
+| [`frontend/`](frontend/) | React/TypeScript live demo of the RAG pipeline ([details](frontend/README.md)) |
 | [`data/eval_datasets/`](data/eval_datasets/) | RAG quality and adversarial evaluation cases |
 | [`tests/`](tests/) | Unit and PostgreSQL integration tests |
 | [`docs/`](docs/) | Architecture, ADRs, developer-agent design, deployment, limitations |
