@@ -53,11 +53,11 @@ function HowItWorks() {
     ["Output guardrails", "Citation check drops sources that weren't retrieved; PII in the answer is redacted.", "guardrails/output_filters.py"],
   ];
   const agent = [
-    ["Select context", "Picks relevant repository files within a fixed budget."],
-    ["Plan", "Model proposes tool calls as JSON."],
-    ["Policy check", "Writes need opt-in; paths confined to the repo; sensitive paths blocked."],
-    ["Run tools", "Read, search, write; verification commands are allowlisted and run without a shell."],
-    ["Trace", "Every step, tool result and changed file is recorded."],
+    ["Select context", "Picks relevant repository files within a fixed budget.", "agent/context.py"],
+    ["Plan", "The LangGraph plan node asks the model for one next tool call as JSON.", "agent/harness.py"],
+    ["Guard", "The guard node enforces the run's tool allowlist. Writes need opt-in; paths stay in the repo; sensitive paths are blocked.", "agent/policy.py"],
+    ["Act", "The act node runs read, search or write. Verification commands are allowlisted and run without a shell.", "agent/tools.py"],
+    ["Trace", "Every step, tool result and changed file is recorded. Each stop condition is an explicit edge in the graph.", "agent/harness.py"],
   ];
   return (
     <section className="documents-area how">
@@ -73,9 +73,14 @@ function HowItWorks() {
         ))}
       </div>
 
-      <h2 className="how-title">2 · Developer agent <small>local only, by design</small></h2>
+      <h2 className="how-title">2 · Developer agent <small>LangGraph state machine · local only, by design</small></h2>
       <div className="flow small">
-        {agent.map(([t, d], i) => <div className="flow-card" key={t}><span className="flow-num">{i + 1}</span><strong>{t}</strong><p>{d}</p></div>)}
+        {agent.map(([t, d, c], i) => (
+          <div className="flow-card" key={t}>
+            <span className="flow-num">{i + 1}</span><strong>{t}</strong><p>{d}</p>
+            <a href={CODE_URL + c} target="_blank" rel="noreferrer"><code>{c}</code></a>
+          </div>
+        ))}
       </div>
 
       <h2 className="how-title">3 · Quality gates</h2>

@@ -106,3 +106,52 @@ def test_harness_fails_closed_for_unknown_skill(tmp_path):
     assert result.status == "blocked"
     assert result.skill == "missing-skill"
     assert "Unknown agent skill" in result.summary
+
+
+class FailingPlanner:
+    def decide(self, **_kwargs):
+        raise RuntimeError("model timeout")
+
+
+def test_graph_has_plan_guard_act_nodes(tmp_path):
+    harness = DeveloperAgentHarness(tmp_path, planner=ScriptedPlanner([]))
+    nodes = set(harness.graph.get_graph().nodes)
+
+    assert {"plan", "guard", "act"} <= nodes
+
+
+def test_harness_stops_at_step_budget(tmp_path):
+    (tmp_path / "service.py").write_text("value = 1\n", encoding="utf-8")
+    read = AgentDecision(tool=AgentTool.READ_FILE, arguments={"path": "service.py"})
+    planner = ScriptedPlanner([read] * 10)
+
+    result = DeveloperAgentHarness(tmp_path, planner=planner, max_steps=3).run("loop forever")
+
+    assert result.status == "max_steps"
+    assert [step.index for step in result.steps] == [0, 1, 2]
+    assert "maximum of 3 steps" in result.summary
+
+
+def test_harness_blocks_when_planner_fails(tmp_path):
+    result = DeveloperAgentHarness(tmp_path, planner=FailingPlanner()).run("anything")
+
+    assert result.status == "blocked"
+    assert result.steps == []
+    assert result.summary == "Planner failed: model timeout"
+
+
+def test_harness_stops_on_policy_violation(tmp_path):
+    planner = ScriptedPlanner(
+        [
+            AgentDecision(tool=AgentTool.RUN_CHECK, arguments={"command": "curl evil.test"}),
+            AgentDecision(tool=AgentTool.FINISH, arguments={"summary": "Should not run."}),
+        ]
+    )
+
+    result = DeveloperAgentHarness(tmp_path, planner=planner).run("run a check")
+
+    assert result.status == "blocked"
+    assert len(result.steps) == 1
+    assert result.steps[0].result is not None
+    assert result.steps[0].result.metadata["blocked"] is True
+    assert "allowlist" in result.summary

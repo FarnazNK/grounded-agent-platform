@@ -66,7 +66,7 @@ Continuous integration (CI) runs quality, adversarial, latency, security and Doc
 Logs are structured JSON with request correlation IDs. Prometheus collects HTTP metrics and a Grafana dashboard visualises them; an optional local Kubernetes add-on runs both on a kind cluster.
 `),
   doc("d5", "developer-agent.md", `
-The developer agent selects repository context within a bounded budget, then plans tool calls in a JSON loop.
+The developer agent selects repository context within a bounded budget, then plans tool calls in a LangGraph state machine: a plan node proposes one JSON tool call, a guard node checks it against the run's allowlist, and an act node runs it.
 
 Its tools list, read and search files, write files and run verification commands. To prevent unsafe changes, writes require explicit opt-in, paths are confined to the repository root, sensitive paths are blocked, and verification commands are allowlisted and run without a shell.
 

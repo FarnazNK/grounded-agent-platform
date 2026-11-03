@@ -19,11 +19,11 @@
 | | |
 | --- | --- |
 | **What it is** | (1) A RAG API: upload documents per workspace, ask questions, get answers with checked citations. (2) A developer agent that reads code, proposes changes and runs tests, within strict rules. |
-| **AI techniques** | Hybrid retrieval (pgvector + full-text) with reciprocal-rank fusion, citation validation, input/context/output guardrails, tool-calling agent loop, reusable skills |
+| **AI techniques** | Hybrid retrieval (pgvector + full-text) with reciprocal-rank fusion, citation validation, input/context/output guardrails, tool-calling agent orchestrated as a **LangGraph** state machine, reusable skills |
 | **Backend** | Python, FastAPI, Pydantic, SQLAlchemy, PostgreSQL 16 + pgvector, Alembic, JWT |
 | **Frontend** | React, TypeScript, Vite: an interactive pipeline walkthrough, sandboxed by a strict Content-Security-Policy |
 | **Models** | Anthropic or OpenAI adapters, plus deterministic offline providers for reproducible CI |
-| **Quality** | 101 unit tests + PostgreSQL integration tests, RAG and adversarial eval gates, agent context eval, p95 latency gate, mypy, CodeQL, pip-audit |
+| **Quality** | 105 unit tests + PostgreSQL integration tests, RAG and adversarial eval gates, agent context eval, p95 latency gate, mypy, CodeQL, pip-audit |
 | **Deployed on** | Vercel: the API with Neon PostgreSQL/pgvector, plus the demo front end. The developer agent runs locally only. |
 
 ## What I built
@@ -38,7 +38,20 @@ Organizations → workspaces → viewer/editor/admin memberships. Every upload, 
 
 ### 🤖 A developer agent where *the model proposes and policy decides*
 The agent picks the most relevant files within a fixed context budget, then plans with narrow tools (`list_files`, `read_file`, `search_code`, `write_file`, `run_check`, `finish`). Every tool call is checked **outside the model**: it can't leave the repo, can't touch credential-like paths, can only run allowlisted test/lint commands **without a shell**, and **can't write at all unless the operator passes `--allow-writes`**. Each run produces a step-by-step trace. Reusable YAML skills (`code-change`, `debug`, `review`) bring their own tool allowlists.
-→ [`src/rag_agent/agent/`](src/rag_agent/agent/), [`agent_skills/`](agent_skills/)
+
+The run loop is a **LangGraph `StateGraph`** with three nodes. `plan` asks the model for one next action, `guard` enforces the run's tool allowlist and handles `finish`, and `act` executes the tool through the policy layer. Every way a run can stop (planner error, disallowed tool, policy violation, finish, step budget) is one explicit transition to `END`, and each has its own test. The diagram below is generated from the compiled graph with `harness.graph.get_graph().draw_mermaid()`.
+
+```mermaid
+flowchart TD
+    S([start]) --> plan
+    plan -. "planner error" .-> E([end])
+    plan --> guard
+    guard -. "finish or tool not allowed" .-> E
+    guard --> act
+    act -. "policy violation or step budget" .-> E
+    act --> plan
+```
+→ [`src/rag_agent/agent/harness.py`](src/rag_agent/agent/harness.py), [`agent_skills/`](agent_skills/)
 
 ### 📏 AI quality measured in CI, not assumed
 Every pull request must pass:
@@ -75,7 +88,7 @@ flowchart LR
 
     subgraph DEV["Developer agent · local only"]
         T["Task"] --> CX["Context selection<br/>(budgeted)"]
-        CX --> P["Tool planner"]
+        CX --> P["Tool planner<br/>(LangGraph)"]
         P --> PO{"Policy check"}
         PO -->|allowed| TO["Tools: read · search ·<br/>write* · run_check"]
         TO --> TR["Run trace"]
@@ -137,7 +150,7 @@ None of these are deployed or needed to evaluate the project. All run locally wi
 | Path | What's there |
 | --- | --- |
 | [`src/rag_agent/`](src/rag_agent/) | Retrieval, RAG service, auth, guardrails, evals, FastAPI app |
-| [`src/rag_agent/agent/`](src/rag_agent/agent/) | Developer agent: context, planner, tools, policy, skills, harness |
+| [`src/rag_agent/agent/`](src/rag_agent/agent/) | Developer agent: context, planner, tools, policy, skills, LangGraph harness |
 | [`frontend/`](frontend/) | React/TypeScript live demo of the RAG pipeline ([details](frontend/README.md)) |
 | [`data/eval_datasets/`](data/eval_datasets/) | RAG quality and adversarial evaluation cases |
 | [`tests/`](tests/) | Unit and PostgreSQL integration tests |
