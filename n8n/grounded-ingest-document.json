@@ -1,0 +1,313 @@
+{
+  "name": "Grounded Agent: ingest a document",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "grounded-ingest",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "grounded-ingest",
+      "id": "34686161-24c3-5123-a652-4f0adac2c776"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || {};\nconst filename = typeof body.filename === 'string' ? body.filename.trim() : '';\nconst text = typeof body.text === 'string' ? body.text : '';\nlet error = '';\nif (!filename) error = 'filename is required, e.g. \"notes.md\"';\nelse if (!/\\.(md|txt)$/i.test(filename)) error = 'filename must end in .md or .txt';\nelse if (!text.trim()) error = 'text is required';\nreturn [{ json: { error } }];"
+      },
+      "name": "Validate input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "id": "909fc3ba-17f8-5e7b-a914-d9c6d12d210a"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "9e8c2df1-54f1-496d-83de-66cdb3fd013f",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Input OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ],
+      "id": "58a25fce-5cad-568f-95b4-2d623ef1544b"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GROUNDED_API_URL }}/v1/auth/login",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ email: $env.GROUNDED_EMAIL, password: $env.GROUNDED_PASSWORD }) }}",
+        "options": {}
+      },
+      "name": "Log in",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "id": "fd45ce39-70e9-57d5-8307-92ab646e7df9"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.GROUNDED_API_URL }}/v1/workspaces",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Log in').first().json.access_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "List workspaces",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "id": "7b9a5c76-700e-5105-85e8-c7489595d75c"
+    },
+    {
+      "parameters": {
+        "jsCode": "const slug = $env.GROUNDED_WORKSPACE_SLUG;\nconst list = $input.first().json.workspaces || [];\nconst match = slug ? list.find((m) => m.workspace.slug === slug) : list[0];\nif (!match) {\n  throw new Error(slug ? `No workspace with slug \"${slug}\" for this user` : 'This user has no workspaces');\n}\nreturn [{ json: { workspace_id: match.workspace.id, workspace_slug: match.workspace.slug } }];"
+      },
+      "name": "Pick workspace",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ],
+      "id": "fdc66bc6-2fc6-5f3d-93aa-75fbc374c205"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $('Webhook').first().json.body;\nconst filename = body.filename.trim();\nconst type = filename.toLowerCase().endsWith('.txt') ? 'text/plain' : 'text/markdown';\nconst binary = await this.helpers.prepareBinaryData(Buffer.from(body.text, 'utf8'), filename, type);\nreturn [{ json: { ...$input.first().json, filename }, binary: { file: binary } }];"
+      },
+      "name": "Build file",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1320,
+        0
+      ],
+      "id": "d7cb3884-e8e3-513d-a167-38967f05f1c7"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GROUNDED_API_URL }}/v1/documents/upload",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "workspace_id",
+              "value": "={{ $json.workspace_id }}"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Log in').first().json.access_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "file"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "Upload document",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1540,
+        0
+      ],
+      "id": "39f4797c-6798-593d-9d04-f58b79630049"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ document_id: $json.document.id, source_name: $json.document.source_name, status: $json.document.status, job_status: $json.job ? $json.job.status : null }) }}",
+        "options": {}
+      },
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1760,
+        0
+      ],
+      "id": "e8c688d9-7b60-5b70-a84e-9fafe0a29843"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ error: $json.error }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "name": "Reject",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        200
+      ],
+      "id": "403785c6-bc66-50a4-8bf3-46bc270af708"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log in": {
+      "main": [
+        [
+          {
+            "node": "List workspaces",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List workspaces": {
+      "main": [
+        [
+          {
+            "node": "Pick workspace",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick workspace": {
+      "main": [
+        [
+          {
+            "node": "Build file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Build file": {
+      "main": [
+        [
+          {
+            "node": "Upload document",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload document": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate input": {
+      "main": [
+        [
+          {
+            "node": "Input OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Input OK?": {
+      "main": [
+        [
+          {
+            "node": "Log in",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}

@@ -1,0 +1,272 @@
+{
+  "name": "Grounded Agent: ask a question",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "grounded-ask",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Webhook",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        0
+      ],
+      "webhookId": "grounded-ask",
+      "id": "81798649-6059-5b56-a368-5b5a03836fb7"
+    },
+    {
+      "parameters": {
+        "jsCode": "const body = $input.first().json.body || {};\nconst question = typeof body.question === 'string' ? body.question.trim() : '';\nlet error = '';\nif (!question) error = 'question is required';\nelse if (question.length > 2000) error = 'question must be 2000 characters or fewer';\nreturn [{ json: { error } }];"
+      },
+      "name": "Validate input",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        220,
+        0
+      ],
+      "id": "e45f69bf-3013-56b6-82a0-e36f62122cd8"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "d875b77a-27e0-452e-b251-c9778d7a0797",
+              "leftValue": "={{ $json.error }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "empty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Input OK?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        440,
+        0
+      ],
+      "id": "445e9f6d-fbff-5be4-88f0-508009e79100"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GROUNDED_API_URL }}/v1/auth/login",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ email: $env.GROUNDED_EMAIL, password: $env.GROUNDED_PASSWORD }) }}",
+        "options": {}
+      },
+      "name": "Log in",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        660,
+        0
+      ],
+      "id": "bb6506ed-b132-53f4-8598-a4ef7de7b2df"
+    },
+    {
+      "parameters": {
+        "url": "={{ $env.GROUNDED_API_URL }}/v1/workspaces",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Log in').first().json.access_token }}"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "name": "List workspaces",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        880,
+        0
+      ],
+      "id": "01e32552-59d5-54a6-adf1-a9b2d42bc747"
+    },
+    {
+      "parameters": {
+        "jsCode": "const slug = $env.GROUNDED_WORKSPACE_SLUG;\nconst list = $input.first().json.workspaces || [];\nconst match = slug ? list.find((m) => m.workspace.slug === slug) : list[0];\nif (!match) {\n  throw new Error(slug ? `No workspace with slug \"${slug}\" for this user` : 'This user has no workspaces');\n}\nreturn [{ json: { workspace_id: match.workspace.id, workspace_slug: match.workspace.slug } }];"
+      },
+      "name": "Pick workspace",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1100,
+        0
+      ],
+      "id": "1d09bc42-8fcd-5382-97a6-4699e0345024"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.GROUNDED_API_URL }}/v1/query",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Authorization",
+              "value": "=Bearer {{ $('Log in').first().json.access_token }}"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={{ JSON.stringify({ workspace_id: $json.workspace_id, query: $('Webhook').first().json.body.question.trim() }) }}",
+        "options": {}
+      },
+      "name": "Ask question",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        1320,
+        0
+      ],
+      "id": "880036e6-b33c-5ac6-8925-6fafe2c22e36"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ answer: $json.result.answer, citations: $json.result.citations, grounded: $json.result.grounded, refusal: $json.result.refusal }) }}",
+        "options": {}
+      },
+      "name": "Respond",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        1540,
+        0
+      ],
+      "id": "932d7519-1135-50b7-a247-3e372189e7cc"
+    },
+    {
+      "parameters": {
+        "respondWith": "json",
+        "responseBody": "={{ JSON.stringify({ error: $json.error }) }}",
+        "options": {
+          "responseCode": 400
+        }
+      },
+      "name": "Reject",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.1,
+      "position": [
+        660,
+        200
+      ],
+      "id": "5465c5ca-aa09-52f9-9846-ec46e4dfe42a"
+    }
+  ],
+  "connections": {
+    "Webhook": {
+      "main": [
+        [
+          {
+            "node": "Validate input",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Log in": {
+      "main": [
+        [
+          {
+            "node": "List workspaces",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "List workspaces": {
+      "main": [
+        [
+          {
+            "node": "Pick workspace",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Pick workspace": {
+      "main": [
+        [
+          {
+            "node": "Ask question",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Ask question": {
+      "main": [
+        [
+          {
+            "node": "Respond",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate input": {
+      "main": [
+        [
+          {
+            "node": "Input OK?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Input OK?": {
+      "main": [
+        [
+          {
+            "node": "Log in",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Reject",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "pinData": {}
+}
