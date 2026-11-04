@@ -23,7 +23,7 @@
 | **Backend** | Python, FastAPI, Pydantic, SQLAlchemy, PostgreSQL 16 + pgvector, Alembic, JWT |
 | **Frontend** | React, TypeScript, Vite: an interactive pipeline walkthrough, sandboxed by a strict Content-Security-Policy |
 | **Models** | Anthropic or OpenAI adapters, plus deterministic offline providers for reproducible CI |
-| **Quality** | 105 unit tests + PostgreSQL integration tests, RAG and adversarial eval gates, agent context eval, p95 latency gate, mypy, CodeQL, pip-audit |
+| **Quality** | 112 unit tests + PostgreSQL integration tests, RAG and adversarial eval gates, agent context eval, p95 latency gate, mypy, CodeQL, pip-audit |
 | **Deployed on** | Vercel: the API with Neon PostgreSQL/pgvector, plus the demo front end. The developer agent runs locally only. |
 
 ## What I built
@@ -52,6 +52,10 @@ flowchart TD
     act --> plan
 ```
 → [`src/rag_agent/agent/harness.py`](src/rag_agent/agent/harness.py), [`agent_skills/`](agent_skills/)
+
+### ⚙️ n8n workflows: RAG as a webhook
+Two importable **n8n** workflows expose the API as webhooks: one ingests a document, the other asks a question and returns the cited answer. Both sign in and call the existing API, so workspace isolation, guardrails and citation checks still run on the server rather than in the workflow. `docker compose up` also starts n8n with the API wired in, and a CI test keeps the workflows in sync with the real routes.
+→ [`n8n/`](n8n/)
 
 ### 📏 AI quality measured in CI, not assumed
 Every pull request must pass:
@@ -124,6 +128,8 @@ APP_LLM_PROVIDER=anthropic APP_LLM_MODEL=<model> \
   rag-agent dev-agent --repo . --skill review --task "Review the auth path for security issues"
 ```
 
+**Automate with n8n:** `docker compose up` starts n8n at http://localhost:5678 next to the API. Import the workflows in [`n8n/`](n8n/) to ingest documents and ask questions by webhook. Setup is in [`n8n/README.md`](n8n/README.md).
+
 ## Honest limitations
 
 - **Small CI eval sets:** the CI gates use small regression sets (3 RAG, 3 adversarial, 4 agent cases). Larger HR-policy sets (7 and 23 questions) run, but don't pass the answer-relevance gate with the offline providers yet, so they aren't in CI. On the 23-question set: recall 0.96, citation correctness 0.65.
@@ -155,6 +161,7 @@ None of these are deployed or needed to evaluate the project. All run locally wi
 | [`data/eval_datasets/`](data/eval_datasets/) | RAG quality and adversarial evaluation cases |
 | [`tests/`](tests/) | Unit and PostgreSQL integration tests |
 | [`docs/`](docs/) | Architecture, ADRs, developer-agent design, deployment, limitations |
+| [`n8n/`](n8n/) | Importable n8n workflows: ingest a document, ask a question |
 
 ---
 

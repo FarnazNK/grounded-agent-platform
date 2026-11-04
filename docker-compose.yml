@@ -52,5 +52,26 @@ services:
     depends_on:
       - prometheus
 
+  # Workflow automation: import the files in n8n/ at http://localhost:5678.
+  # Optional; nothing else depends on it.
+  n8n:
+    image: docker.n8n.io/n8nio/n8n:${N8N_VERSION:-latest}
+    environment:
+      GENERIC_TIMEZONE: ${TZ:-America/Edmonton}
+      N8N_BLOCK_ENV_ACCESS_IN_NODE: 'false'
+      N8N_SECURE_COOKIE: 'false'
+      GROUNDED_API_URL: http://api:8000
+      GROUNDED_EMAIL: ${GROUNDED_EMAIL:-}
+      GROUNDED_PASSWORD: ${GROUNDED_PASSWORD:-}
+      GROUNDED_WORKSPACE_SLUG: ${GROUNDED_WORKSPACE_SLUG:-}
+    volumes:
+      - n8n-data:/home/node/.n8n
+      - ./n8n:/workflows:ro
+    ports:
+      - '5678:5678'
+    depends_on:
+      - api
+
 volumes:
   postgres-data:
+  n8n-data:
