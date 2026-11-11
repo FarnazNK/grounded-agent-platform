@@ -1,6 +1,8 @@
 # Grounded Agent Platform
 
 [![CI](https://github.com/FarnazNK/grounded-agent-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/FarnazNK/grounded-agent-platform/actions/workflows/ci.yml)
+[![Security](https://github.com/FarnazNK/grounded-agent-platform/actions/workflows/security.yml/badge.svg)](https://github.com/FarnazNK/grounded-agent-platform/actions/workflows/security.yml)
+[![Frontend build](https://github.com/FarnazNK/grounded-agent-platform/actions/workflows/frontend.yml/badge.svg)](https://github.com/FarnazNK/grounded-agent-platform/actions/workflows/frontend.yml)
 
 A multi-tenant RAG API and a policy-controlled coding agent. The model proposes; code outside the model decides what it may see, call and claim.
 
