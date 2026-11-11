@@ -50,3 +50,28 @@ class AgentRunResult(BaseModel):
     summary: str = ""
     changed_files: list[str] = Field(default_factory=list)
     skill: str | None = None
+
+
+class TeamRole(StrEnum):
+    PLANNER = "planner"
+    CODER = "coder"
+    REVIEWER = "reviewer"
+
+
+class RoleRun(BaseModel):
+    role: TeamRole
+    round: int
+    result: AgentRunResult
+
+
+class TeamRunResult(BaseModel):
+    run_id: str
+    task: str
+    status: Literal["completed", "blocked", "max_steps", "changes_requested"]
+    plan: str = ""
+    review_verdict: Literal["approve", "request_changes"] | None = None
+    review_rounds: int = 0
+    total_steps: int = 0
+    runs: list[RoleRun] = Field(default_factory=list)
+    changed_files: list[str] = Field(default_factory=list)
+    summary: str = ""

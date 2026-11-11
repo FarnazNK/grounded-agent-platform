@@ -49,6 +49,12 @@ docker-up:
 docker-down:
 	docker compose down -v
 
+langfuse-up:
+	docker compose -f monitoring/langfuse/docker-compose.yml up -d
+
+langfuse-down:
+	docker compose -f monitoring/langfuse/docker-compose.yml down
+
 clean:
 	rm -rf .pytest_cache .ruff_cache .mypy_cache build dist *.egg-info coverage.xml .coverage htmlcov
 

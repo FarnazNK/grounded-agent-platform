@@ -6,6 +6,7 @@ from typing import Any, Protocol
 from rag_agent.agent.models import AgentDecision, AgentStep, AgentTool, ContextFile
 from rag_agent.agent.skills import AgentSkill
 from rag_agent.config import Settings
+from rag_agent.tracing import get_tracer
 
 
 class AgentPlanner(Protocol):
@@ -33,14 +34,18 @@ class DeterministicPlanner:
         skill: AgentSkill | None,
     ) -> AgentDecision:
         files = ", ".join(item.path for item in context[:5]) or "no matching files"
+        arguments: dict[str, Any] = {
+            "summary": (
+                "Deterministic dry run completed. "
+                f"Selected repository context for '{task}': {files}."
+            )
+        }
+        if skill is not None and skill.name == "team-reviewer":
+            # A dry run makes no changes, so there is nothing for the reviewer to reject.
+            arguments["verdict"] = "approve"
         return AgentDecision(
             tool=AgentTool.FINISH,
-            arguments={
-                "summary": (
-                    "Deterministic dry run completed. "
-                    f"Selected repository context for '{task}': {files}."
-                )
-            },
+            arguments=arguments,
             reason="Remote model execution is disabled in deterministic mode.",
         )
 
@@ -151,11 +156,13 @@ class LLMToolPlanner:
             },
             ensure_ascii=False,
         )
+        callbacks = get_tracer().langchain_callbacks()
         response = self._client.invoke(
             [
                 ("system", system),
                 ("human", user),
-            ]
+            ],
+            config={"callbacks": callbacks} if callbacks else None,
         )
         payload = json.loads(self._strip_fence(self._response_text(response)))
         return AgentDecision.model_validate(payload)
