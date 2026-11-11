@@ -31,6 +31,9 @@ from rag_agent.schemas import (
     WorkspaceRecord,
 )
 
+# Arbitrary constant identifying the bootstrap critical section.
+_BOOTSTRAP_LOCK_KEY = 7_041_202_611
+
 
 class PostgresRAGStore:
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
@@ -56,6 +59,58 @@ class PostgresRAGStore:
         def inner():
             with self._session() as session:
                 return int(session.scalar(select(func.count()).select_from(User)) or 0)
+
+        return self._run(inner)
+
+    def bootstrap_first_admin(
+        self,
+        *,
+        email: str,
+        password_hash: str,
+        organization_slug: str,
+        organization_name: str,
+        workspace_slug: str,
+        workspace_name: str,
+    ) -> WorkspaceMembership | None:
+        """Create the first admin in one transaction.
+
+        A transaction-scoped advisory lock serializes concurrent bootstrap calls, so only
+        the first caller sees zero users; a failure part-way rolls everything back.
+        """
+
+        def inner():
+            with self._session() as session, session.begin():
+                session.execute(
+                    text("SELECT pg_advisory_xact_lock(:key)"), {"key": _BOOTSTRAP_LOCK_KEY}
+                )
+                if session.scalar(select(func.count()).select_from(User)):
+                    return None
+                user = User(email=email, password_hash=password_hash, is_active=True)
+                org = Organization(slug=organization_slug, name=organization_name)
+                session.add_all([user, org])
+                session.flush()
+                workspace = Workspace(
+                    organization_id=org.id,
+                    slug=workspace_slug,
+                    name=workspace_name,
+                    index_version=1,
+                )
+                session.add(workspace)
+                session.flush()
+                session.add(
+                    Membership(
+                        user_id=user.id,
+                        organization_id=org.id,
+                        workspace_id=workspace.id,
+                        role=MembershipRole.admin.value,
+                    )
+                )
+                session.flush()
+                return WorkspaceMembership(
+                    workspace=WorkspaceRecord.model_validate(workspace),
+                    organization=OrganizationRecord.model_validate(org),
+                    role=MembershipRole.admin,
+                )
 
         return self._run(inner)
 

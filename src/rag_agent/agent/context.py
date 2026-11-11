@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 
 from rag_agent.agent.models import ContextFile
-from rag_agent.agent.policy import is_sensitive_path
+from rag_agent.agent.policy import has_symlink, is_sensitive_path, read_regular_file
 
 _RAW_TOKEN_RE = re.compile(r"[A-Za-z0-9]+")
 _CAMEL_BOUNDARY_RE = re.compile(r"(?<=[a-z0-9])(?=[A-Z])")
@@ -145,7 +145,8 @@ class RepositoryContextBuilder:
     def iter_candidate_paths(self) -> list[Path]:
         candidates: list[Path] = []
         for path in self.repo_root.rglob("*"):
-            if not path.is_file():
+            # Symlinks could point outside the repository or at excluded files.
+            if path.is_symlink() or not path.is_file() or has_symlink(self.repo_root, path):
                 continue
             relative = path.relative_to(self.repo_root)
             relative_posix = relative.as_posix()
@@ -169,7 +170,7 @@ class RepositoryContextBuilder:
         return sorted(candidates)
 
     def _read(self, path: Path) -> tuple[str, bool]:
-        raw = path.read_text(encoding="utf-8", errors="replace")
+        raw = read_regular_file(self.repo_root, path)
         max_chars = min(self.max_file_bytes, self.max_context_chars)
         if len(raw) <= max_chars:
             return raw, False
@@ -183,7 +184,7 @@ class RepositoryContextBuilder:
             relative = path.relative_to(self.repo_root).as_posix()
             try:
                 content, truncated = self._read(path)
-            except OSError:
+            except (OSError, ValueError):
                 continue
 
             path_tokens = _tokens(relative.replace("/", " "))

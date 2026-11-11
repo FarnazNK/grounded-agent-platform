@@ -17,18 +17,18 @@ jobs:
         image: pgvector/pgvector:pg16
         env:
           POSTGRES_USER: rag_agent
-          POSTGRES_DB: rag_agent
+          POSTGRES_DB: rag_agent_test
           POSTGRES_HOST_AUTH_METHOD: trust
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U rag_agent -d rag_agent"
+          --health-cmd "pg_isready -U rag_agent -d rag_agent_test"
           --health-interval 10s
           --health-timeout 5s
           --health-retries 10
     env:
-      APP_DATABASE_URL: postgresql+psycopg://rag_agent@localhost:5432/rag_agent
-      TEST_DATABASE_URL: postgresql+psycopg://rag_agent@localhost:5432/rag_agent
+      APP_DATABASE_URL: postgresql+psycopg://rag_agent@localhost:5432/rag_agent_test
+      TEST_DATABASE_URL: postgresql+psycopg://rag_agent@localhost:5432/rag_agent_test
       APP_JWT_SECRET: ci-secret-ci-secret-ci-secret-ci-secret
       APP_LLM_PROVIDER: deterministic
       APP_EMBEDDING_PROVIDER: deterministic

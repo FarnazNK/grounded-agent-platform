@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import re
+import threading
 from collections import Counter
 from copy import deepcopy
 from datetime import UTC, datetime
@@ -26,6 +27,19 @@ from rag_agent.schemas import (
 class RAGStore(Protocol):
     def ping(self) -> None: ...
     def user_count(self) -> int: ...
+    def bootstrap_first_admin(
+        self,
+        *,
+        email: str,
+        password_hash: str,
+        organization_slug: str,
+        organization_name: str,
+        workspace_slug: str,
+        workspace_name: str,
+    ) -> WorkspaceMembership | None:
+        """Atomically create the first admin; return None if any user already exists."""
+        ...
+
     def create_user(self, email: str, password_hash: str) -> UserRecord: ...
     def get_user(self, user_id: str) -> UserRecord | None: ...
     def get_user_by_email(self, email: str) -> UserRecord | None: ...
@@ -71,6 +85,7 @@ class InMemoryRAGStore:
         self.chunks: dict[str, ChunkRecord] = {}
         self.ingestion_jobs: dict[str, IngestionJobRecord] = {}
         self.available = True
+        self._bootstrap_lock = threading.Lock()
 
     def ping(self) -> None:
         if not self.available:
@@ -78,6 +93,27 @@ class InMemoryRAGStore:
 
     def user_count(self) -> int:
         return len(self.users)
+
+    def bootstrap_first_admin(
+        self,
+        *,
+        email: str,
+        password_hash: str,
+        organization_slug: str,
+        organization_name: str,
+        workspace_slug: str,
+        workspace_name: str,
+    ) -> WorkspaceMembership | None:
+        with self._bootstrap_lock:
+            if self.users:
+                return None
+            user = self.create_user(email, password_hash)
+            org = self.create_organization(organization_slug, organization_name)
+            workspace = self.create_workspace(org.id, workspace_slug, workspace_name)
+            self.add_membership(user.id, org.id, workspace.id, MembershipRole.admin)
+            return WorkspaceMembership(
+                workspace=workspace, organization=org, role=MembershipRole.admin
+            )
 
     def create_user(self, email: str, password_hash: str) -> UserRecord:
         record = UserRecord(email=email, password_hash=password_hash)

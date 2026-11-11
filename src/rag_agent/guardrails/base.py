@@ -18,6 +18,7 @@ class GuardrailAction(StrEnum):
     ALLOW = "allow"  # safe; pass through
     SANITIZE = "sanitize"  # replace `sanitized_text` and continue
     BLOCK = "block"  # refuse the request
+    FLAG = "flag"  # pass through unchanged, but the caller must mark the result
 
 
 @dataclass

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import shlex
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -81,6 +83,63 @@ def is_sensitive_path(
     return relative.suffix.lower() in DEFAULT_DENIED_SUFFIXES
 
 
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+
+
+def has_symlink(repo_root: Path, candidate: Path) -> bool:
+    """True if ``candidate`` (under an already-resolved root) passes through a symlink."""
+    lexical = Path(os.path.normpath(candidate))
+    return not lexical.is_relative_to(repo_root) or lexical != lexical.resolve()
+
+
+_DIRECTORY = getattr(os, "O_DIRECTORY", 0)
+
+
+def _open_beneath(repo_root: Path, path: Path, flags: int, *, create_parents: bool = False) -> int:
+    """Open ``path`` by walking down from ``repo_root`` one directory descriptor at a time.
+
+    Every component is opened relative to its parent's descriptor with ``O_NOFOLLOW``, so
+    no directory or file can be swapped for a symlink between validation and use; the
+    kernel refuses to follow it at whichever component was replaced.
+    """
+    relative = Path(os.path.normpath(path)).relative_to(repo_root)
+    parts = relative.parts
+    if not parts or any(part in ("", ".", "..") for part in parts):
+        raise PolicyViolation("Invalid repository path.")
+
+    dir_fd = os.open(repo_root, os.O_RDONLY | _DIRECTORY)
+    try:
+        for part in parts[:-1]:
+            try:
+                next_fd = os.open(part, os.O_RDONLY | _DIRECTORY | _NOFOLLOW, dir_fd=dir_fd)
+            except FileNotFoundError:
+                if not create_parents:
+                    raise
+                os.mkdir(part, 0o755, dir_fd=dir_fd)
+                next_fd = os.open(part, os.O_RDONLY | _DIRECTORY | _NOFOLLOW, dir_fd=dir_fd)
+            os.close(dir_fd)
+            dir_fd = next_fd
+        return os.open(parts[-1], flags | _NOFOLLOW, 0o644, dir_fd=dir_fd)
+    finally:
+        os.close(dir_fd)
+
+
+def read_regular_file(repo_root: Path, path: Path) -> str:
+    """Read a regular file inside ``repo_root`` without following any symlink."""
+    fd = _open_beneath(repo_root, path, os.O_RDONLY)
+    with os.fdopen(fd, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise PolicyViolation("Only regular files can be read.")
+        return handle.read().decode("utf-8", errors="replace")
+
+
+def write_regular_file(repo_root: Path, path: Path, content: bytes) -> None:
+    """Create or replace a regular file inside ``repo_root`` without following any symlink."""
+    fd = _open_beneath(repo_root, path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, create_parents=True)
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(content)
+
+
 @dataclass(frozen=True)
 class ToolPolicy:
     allow_writes: bool = False
@@ -100,9 +159,12 @@ class ToolPolicy:
             raise PolicyViolation("Invalid repository path.")
 
         repo_root = repo_root.resolve()
-        candidate = (repo_root / relative_path).resolve()
-        if not candidate.is_relative_to(repo_root):
+        lexical = Path(os.path.normpath(repo_root / relative_path))
+        candidate = lexical.resolve()
+        if not lexical.is_relative_to(repo_root) or not candidate.is_relative_to(repo_root):
             raise PolicyViolation("Path escapes the repository root.")
+        if candidate != lexical:
+            raise PolicyViolation("Symlinks are not allowed in repository paths.")
 
         relative = candidate.relative_to(repo_root)
         if is_sensitive_path(relative, denied_parts=self.denied_parts):

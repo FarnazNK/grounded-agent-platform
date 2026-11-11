@@ -65,12 +65,21 @@ class SourceCitationChecker:
 
     valid_sources: frozenset[str] = frozenset()
     name: str = "source_citation_checker"
+    # When sources were retrieved, an answer that cites none of them is flagged.
+    require_citation: bool = False
 
     _CITATION_RE = re.compile(r"\[source:\s*([^\]]+)\]", re.I)
 
     def __call__(self, text: str) -> GuardrailDecision:
         cited = {m.group(1).strip() for m in self._CITATION_RE.finditer(text)}
         if not cited:
+            if self.require_citation and self.valid_sources:
+                return GuardrailDecision(
+                    self.name,
+                    GuardrailAction.FLAG,
+                    "answer cites none of the retrieved sources",
+                    metadata={"missing_citation": True},
+                )
             return GuardrailDecision(self.name, GuardrailAction.ALLOW, "no citations to verify")
         invalid = cited - self.valid_sources
         if invalid:
@@ -78,8 +87,8 @@ class SourceCitationChecker:
                 self.name,
                 GuardrailAction.SANITIZE,
                 f"invalid source citations: {sorted(invalid)}",
-                # Strip the bad citations rather than blocking — the surrounding
-                # answer may still be useful.
+                # Remove the bad citations rather than blocking; the caller marks the
+                # answer as ungrounded so a fabricated source is never presented as real.
                 sanitized_text=self._strip_invalid(text, invalid),
                 metadata={"invalid_sources": sorted(invalid), "cited": sorted(cited)},
             )
@@ -88,6 +97,8 @@ class SourceCitationChecker:
     def _strip_invalid(self, text: str, invalid: set[str]) -> str:
         def _maybe_strip(match: re.Match[str]) -> str:
             src = match.group(1).strip()
-            return "[source: unverified]" if src in invalid else match.group(0)
+            return "" if src in invalid else match.group(0)
 
-        return self._CITATION_RE.sub(_maybe_strip, text)
+        stripped = self._CITATION_RE.sub(_maybe_strip, text)
+        stripped = re.sub(r"[ \t]{2,}", " ", stripped)
+        return re.sub(r"\s+([.,;:])", r"\1", stripped).strip()

@@ -1,20 +1,17 @@
 from __future__ import annotations
 
-import os
-
 import pytest
 from sqlalchemy import text
 
 from rag_agent.config import Settings
 from rag_agent.db import get_session_factory, init_engine
 from rag_agent.service import RAGService
+from tests.conftest import disposable_database_url
 
 
 @pytest.mark.integration
 def test_postgres_ingestion_and_query_round_trip():
-    database_url = os.environ.get("TEST_DATABASE_URL")
-    if not database_url:
-        pytest.skip("TEST_DATABASE_URL not set")
+    database_url = disposable_database_url()
 
     from rag_agent.postgres_store import PostgresRAGStore
 

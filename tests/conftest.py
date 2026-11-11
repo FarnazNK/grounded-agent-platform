@@ -89,3 +89,25 @@ def client(seeded_app: SeededApp):
 
 def auth_header(user_id: str, settings: Settings | None = None) -> dict[str, str]:
     return {"Authorization": "Bearer " + create_access_token(user_id, settings)}
+
+
+def disposable_database_url() -> str:
+    """Return TEST_DATABASE_URL only if it names a disposable test database.
+
+    Integration tests TRUNCATE tables, so refuse any database whose name does not
+    contain "test" rather than risk wiping a real one through a misconfigured URL.
+    """
+    import os
+
+    from sqlalchemy.engine import make_url
+
+    url = os.environ.get("TEST_DATABASE_URL")
+    if not url:
+        pytest.skip("TEST_DATABASE_URL not set")
+    database = make_url(url).database or ""
+    if "test" not in database.lower():
+        pytest.fail(
+            f"Refusing to run destructive integration tests against database {database!r}: "
+            "TEST_DATABASE_URL must point at a disposable database whose name contains 'test'."
+        )
+    return url
