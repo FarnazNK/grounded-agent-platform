@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from concurrent.futures import ThreadPoolExecutor
 
 import pytest
@@ -10,6 +9,7 @@ from rag_agent.config import Settings
 from rag_agent.errors import AuthorizationFailedError
 from rag_agent.service import RAGService
 from rag_agent.store import InMemoryRAGStore
+from tests.conftest import disposable_database_url
 
 
 def _settings(**overrides) -> Settings:
@@ -51,9 +51,7 @@ def test_concurrent_bootstrap_creates_exactly_one_admin_in_memory():
 
 @pytest.mark.integration
 def test_concurrent_bootstrap_creates_exactly_one_admin_in_postgres():
-    database_url = os.environ.get("TEST_DATABASE_URL")
-    if not database_url:
-        pytest.skip("TEST_DATABASE_URL not set")
+    database_url = disposable_database_url()
 
     from rag_agent.db import get_session_factory, init_engine
     from rag_agent.postgres_store import PostgresRAGStore

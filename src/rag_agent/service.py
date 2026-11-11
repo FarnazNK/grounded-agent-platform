@@ -6,7 +6,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Literal
+from typing import Any, Literal
 
 from rag_agent.auth import create_access_token, hash_password, verify_password
 from rag_agent.cache import TTLCache
@@ -459,22 +459,22 @@ class RAGService:
 
 
 def _redact_chunks(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
-    """Apply the answer's PII redaction to the source chunks returned alongside it."""
+    """Apply the answer's PII redaction to everything returned with the source chunks."""
     redactor = PIILeakDetector()
 
-    def redact(value: str) -> str:
-        decision = redactor(value)
-        return decision.sanitized_text if decision.sanitized_text is not None else value
+    def redact(value: Any) -> Any:
+        if isinstance(value, str):
+            decision = redactor(value)
+            return decision.sanitized_text if decision.sanitized_text is not None else value
+        if isinstance(value, dict):
+            return {key: redact(item) for key, item in value.items()}
+        if isinstance(value, list | tuple):
+            return type(value)(redact(item) for item in value)
+        return value
 
     return [
         chunk.model_copy(
-            update={
-                "content": redact(chunk.content),
-                "metadata": {
-                    key: redact(item) if isinstance(item, str) else item
-                    for key, item in chunk.metadata.items()
-                },
-            }
+            update={"content": redact(chunk.content), "metadata": redact(chunk.metadata)}
         )
         for chunk in chunks
     ]

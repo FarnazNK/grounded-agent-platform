@@ -170,7 +170,7 @@ class RepositoryContextBuilder:
         return sorted(candidates)
 
     def _read(self, path: Path) -> tuple[str, bool]:
-        raw = read_regular_file(path)
+        raw = read_regular_file(self.repo_root, path)
         max_chars = min(self.max_file_bytes, self.max_context_chars)
         if len(raw) <= max_chars:
             return raw, False

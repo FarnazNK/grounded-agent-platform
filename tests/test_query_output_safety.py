@@ -88,3 +88,29 @@ def test_fabricated_citation_is_removed_and_marked_ungrounded():
     assert result.citations == []
     assert result.grounded is False
     assert result.grounding_issue == "invalid_citation"
+
+
+def test_nested_chunk_metadata_is_redacted():
+    from rag_agent.schemas import RetrievedChunk
+    from rag_agent.service import _redact_chunks
+
+    chunk = RetrievedChunk(
+        chunk_id="c1",
+        document_id="d1",
+        source_name="pto.md",
+        content="contact hr-lead@example.com",
+        fused_score=1.0,
+        metadata={
+            "author": {"email": "owner@example.com", "phones": ["555-123-4567"]},
+            "pages": [1, 2],
+            "tags": ("cc 555-987-6543",),
+        },
+    )
+
+    [redacted] = _redact_chunks([chunk])
+
+    dumped = redacted.model_dump_json()
+    for secret in ("hr-lead@example.com", "owner@example.com", "555-123-4567", "555-987-6543"):
+        assert secret not in dumped
+    assert redacted.metadata["pages"] == [1, 2]
+    assert isinstance(redacted.metadata["tags"], tuple)

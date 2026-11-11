@@ -5,7 +5,12 @@ import os
 import pytest
 
 from rag_agent.agent.context import RepositoryContextBuilder
-from rag_agent.agent.policy import PolicyViolation, ToolPolicy, read_regular_file
+from rag_agent.agent.policy import (
+    PolicyViolation,
+    ToolPolicy,
+    read_regular_file,
+    write_regular_file,
+)
 from rag_agent.agent.tools import RepositoryToolbox
 
 SECRET = "TOP-SECRET-TOKEN"
@@ -74,7 +79,29 @@ def test_read_refuses_a_file_swapped_for_a_symlink_after_validation(repo):
     target.symlink_to(repo.parent / "outside" / "secret.txt")
 
     with pytest.raises(OSError):
-        read_regular_file(validated)
+        read_regular_file(repo, validated)
+
+
+def test_read_refuses_a_parent_directory_swapped_for_a_symlink_after_validation(repo):
+    outside = repo.parent / "outside"
+    (outside / "app.py").write_text(SECRET, encoding="utf-8")
+    validated = ToolPolicy().validate_path(repo, "src/app.py")
+    (repo / "src").rename(repo / "src_moved")
+    (repo / "src").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(OSError):
+        read_regular_file(repo, validated)
+
+
+def test_write_refuses_a_parent_directory_swapped_for_a_symlink(repo):
+    outside = repo.parent / "outside"
+    validated = ToolPolicy(allow_writes=True).validate_path(repo, "src/new.py", for_write=True)
+    (repo / "src").rename(repo / "src_moved")
+    (repo / "src").symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(OSError):
+        write_regular_file(repo, validated, b"pwned")
+    assert not (outside / "new.py").exists()
 
 
 def test_validate_path_rejects_symlinks_even_inside_the_repo(repo):
@@ -88,4 +115,4 @@ def test_validate_path_rejects_symlinks_even_inside_the_repo(repo):
 
 @pytest.mark.skipif(not hasattr(os, "O_NOFOLLOW"), reason="POSIX only")
 def test_regular_files_still_readable(repo):
-    assert read_regular_file(repo / "src" / "app.py") == "print('hello')\n"
+    assert read_regular_file(repo, repo / "src" / "app.py") == "print('hello')\n"

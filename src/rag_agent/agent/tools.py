@@ -82,7 +82,7 @@ class RepositoryToolbox:
                     success=False,
                     output="File does not exist.",
                 )
-            content = read_regular_file(path)
+            content = read_regular_file(self.repo_root, path)
             if len(content) > self.context_builder.max_file_bytes:
                 content = content[: self.context_builder.max_file_bytes]
                 truncated = True
@@ -118,7 +118,7 @@ class RepositoryToolbox:
             relative = path.relative_to(self.repo_root).as_posix()
             try:
                 for line_number, line in enumerate(
-                    read_regular_file(path).splitlines(),
+                    read_regular_file(self.repo_root, path).splitlines(),
                     start=1,
                 ):
                     if query_lower in line.lower():
@@ -145,8 +145,7 @@ class RepositoryToolbox:
             encoded = content.encode("utf-8")
             if len(encoded) > self.policy.max_write_bytes:
                 raise PolicyViolation("Write exceeds the configured size limit.")
-            path.parent.mkdir(parents=True, exist_ok=True)
-            write_regular_file(path, encoded)
+            write_regular_file(self.repo_root, path, encoded)
             return ToolResult(
                 tool=AgentTool.WRITE_FILE,
                 success=True,
