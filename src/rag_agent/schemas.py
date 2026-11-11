@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any
+from typing import Any, Literal
 from uuid import uuid4
 
 from pydantic import BaseModel, Field
@@ -67,6 +67,8 @@ class QueryResult(BaseModel):
     latency: LatencyBreakdown = Field(default_factory=LatencyBreakdown)
     cached: bool = False
     grounded: bool = True
+    # Why grounded is False: "missing_citation" or "invalid_citation".
+    grounding_issue: Literal["missing_citation", "invalid_citation"] | None = None
     sanitized_query: str | None = None
     refusal: bool = False
 

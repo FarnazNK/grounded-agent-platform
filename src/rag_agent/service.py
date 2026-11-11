@@ -6,6 +6,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Literal
 
 from rag_agent.auth import create_access_token, hash_password, verify_password
 from rag_agent.cache import TTLCache
@@ -19,7 +20,6 @@ from rag_agent.errors import (
     IngestionNotFoundError,
     MalformedLLMOutputError,
     RateLimitExceededError,
-    RequestValidationError,
     TokenLimitExceededError,
     WorkspaceNotFoundError,
 )
@@ -45,6 +45,7 @@ from rag_agent.schemas import (
     LatencyBreakdown,
     MembershipRole,
     QueryResult,
+    RetrievedChunk,
     UserRecord,
     WorkspaceMembership,
     WorkspaceRecord,
@@ -116,18 +117,19 @@ class RAGService:
     ) -> WorkspaceMembership:
         if not self.settings.enable_bootstrap_admin:
             raise AuthorizationFailedError("Bootstrap is disabled.")
-        if self.store.user_count() > 0:
+        membership = self.store.bootstrap_first_admin(
+            email=email.strip().casefold(),
+            password_hash=hash_password(password),
+            organization_slug=organization_slug,
+            organization_name=organization_name,
+            workspace_slug=workspace_slug,
+            workspace_name=workspace_name,
+        )
+        if membership is None:
             raise AuthorizationFailedError(
                 "Bootstrap is only allowed before the first user exists."
             )
-        email = email.strip().casefold()
-        if self.store.get_user_by_email(email):
-            raise RequestValidationError("User already exists.")
-        user = self.store.create_user(email, hash_password(password))
-        org = self.store.create_organization(organization_slug, organization_name)
-        workspace = self.store.create_workspace(org.id, workspace_slug, workspace_name)
-        self.store.add_membership(user.id, org.id, workspace.id, MembershipRole.admin)
-        return WorkspaceMembership(workspace=workspace, organization=org, role=MembershipRole.admin)
+        return membership
 
     def authenticate(self, email: str, password: str) -> AuthResult:
         user = self.store.get_user_by_email(email.strip().casefold())
@@ -415,12 +417,13 @@ class RAGService:
                 safe_chunks.append(chunk)
         chunks = safe_chunks
         llm_result = self.llm.answer_question(sanitized_query, chunks)
-        output_text, _ = apply_guardrails(
+        output_text, decisions = apply_guardrails(
             llm_result.text,
             [
                 PIILeakDetector(),
                 SourceCitationChecker(
-                    valid_sources=frozenset(chunk.source_name for chunk in chunks)
+                    valid_sources=frozenset(chunk.source_name for chunk in chunks),
+                    require_citation=True,
                 ),
             ],
             raise_on_block=False,
@@ -428,11 +431,17 @@ class RAGService:
         if not output_text.strip():
             raise MalformedLLMOutputError()
         citations = sorted(set(re.findall(r"\[source:\s*([^\]]+)\]", output_text, flags=re.I)))
+        citation_decision = decisions[-1]
+        grounding_issue: Literal["missing_citation", "invalid_citation"] | None = None
+        if citation_decision.action == GuardrailAction.SANITIZE:
+            grounding_issue = "invalid_citation"
+        elif citation_decision.action == GuardrailAction.FLAG:
+            grounding_issue = "missing_citation"
         result = QueryResult(
             request_id=request_id,
             answer=output_text,
             citations=citations,
-            chunks=chunks,
+            chunks=_redact_chunks(chunks),
             usage=llm_result.usage,
             latency=LatencyBreakdown(
                 total_ms=(time.perf_counter() - start) * 1000,
@@ -441,14 +450,31 @@ class RAGService:
                 db_ms=retrieval_metrics["db_ms"],
             ),
             cached=False,
-            grounded=(
-                (not chunks and not citations)
-                or (
-                    bool(citations)
-                    and set(citations).issubset({chunk.source_name for chunk in chunks})
-                )
-            ),
+            grounded=grounding_issue is None and (bool(citations) or not chunks),
+            grounding_issue=grounding_issue,
             sanitized_query=sanitized_query if sanitized_query != query else None,
             refusal=False,
         )
         return result
+
+
+def _redact_chunks(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
+    """Apply the answer's PII redaction to the source chunks returned alongside it."""
+    redactor = PIILeakDetector()
+
+    def redact(value: str) -> str:
+        decision = redactor(value)
+        return decision.sanitized_text if decision.sanitized_text is not None else value
+
+    return [
+        chunk.model_copy(
+            update={
+                "content": redact(chunk.content),
+                "metadata": {
+                    key: redact(item) if isinstance(item, str) else item
+                    for key, item in chunk.metadata.items()
+                },
+            }
+        )
+        for chunk in chunks
+    ]
