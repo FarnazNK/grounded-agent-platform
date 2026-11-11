@@ -2,9 +2,8 @@ name: security
 
 on:
   push:
-    branches: [main]
+    branches: [main, feature/react-workspace-ui]
   pull_request:
-    branches: [main]
   schedule:
     - cron: "23 5 * * 1"
 
