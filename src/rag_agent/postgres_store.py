@@ -30,6 +30,7 @@ from rag_agent.schemas import (
     WorkspaceMembership,
     WorkspaceRecord,
 )
+from rag_agent.store import STEM_MAX_EXTRA
 
 # Arbitrary constant identifying the bootstrap critical section.
 _BOOTSTRAP_LOCK_KEY = 7_041_202_611
@@ -491,6 +492,48 @@ class PostgresRAGStore:
                 workspace = session.get(Workspace, workspace_id)
                 assert workspace is not None
                 return WorkspaceRecord.model_validate(workspace)
+
+        return self._run(inner)
+
+    def term_document_frequencies(
+        self, workspace_id: str, stems: list[str]
+    ) -> tuple[dict[str, int], int]:
+        """Chunk frequency of each stem, matching the in-memory store's ``stem_matches``.
+
+        Stems are lowercase ``[a-z0-9]+`` tokens, so they are safe inside a regex. ``\\m`` and
+        ``\\M`` are PostgreSQL word boundaries; a word matches when it is the stem plus at most
+        ``STEM_MAX_EXTRA`` more characters. This scans the workspace's chunks once per stem,
+        which is fine for small corpora; a term-statistics table would replace it at scale.
+        """
+        sql = text(
+            r"""
+            WITH ready AS (
+                SELECT c.content
+                FROM document_chunks c
+                JOIN documents d ON d.id = c.document_id
+                WHERE c.workspace_id = :workspace_id AND d.status = 'ready'
+            )
+            SELECT t.stem,
+                   (SELECT count(*) FROM ready
+                     WHERE content ~* CASE WHEN length(t.stem) < 3
+                                           THEN '\m' || t.stem || '\M'
+                                           ELSE '\m' || t.stem || '[a-z0-9]{0,' || :extra || '}\M'
+                                      END) AS df,
+                   (SELECT count(*) FROM ready) AS total
+            FROM unnest(CAST(:stems AS text[])) AS t(stem)
+            """
+        )
+
+        def inner():
+            if not stems:
+                return {}, 0
+            with self._session() as session:
+                rows = session.execute(
+                    sql,
+                    {"workspace_id": workspace_id, "stems": list(stems), "extra": STEM_MAX_EXTRA},
+                ).all()
+            total = int(rows[0].total) if rows else 0
+            return {row.stem: int(row.df) for row in rows}, total
 
         return self._run(inner)
 

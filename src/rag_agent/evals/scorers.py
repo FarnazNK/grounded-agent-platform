@@ -20,6 +20,8 @@ class CaseMetrics:
     latency_ms: float
     total_tokens: int
     estimated_cost_usd: float
+    expect_refusal: bool = False
+    refused: bool = False
 
 
 def score_case(case: EvalCase, result: QueryResult) -> CaseMetrics:
@@ -65,4 +67,6 @@ def score_case(case: EvalCase, result: QueryResult) -> CaseMetrics:
         latency_ms=result.latency.total_ms,
         total_tokens=result.usage.total_tokens,
         estimated_cost_usd=result.usage.estimated_cost_usd,
+        expect_refusal=case.expect_refusal,
+        refused=result.refusal,
     )

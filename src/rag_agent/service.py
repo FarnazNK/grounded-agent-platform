@@ -23,6 +23,7 @@ from rag_agent.errors import (
     TokenLimitExceededError,
     WorkspaceNotFoundError,
 )
+from rag_agent.evidence import REFUSAL_ANSWER, assess_evidence, topic_terms
 from rag_agent.guardrails import (
     DataExfiltrationDetector,
     PIIDetector,
@@ -416,6 +417,31 @@ class RAGService:
             if decision.action != GuardrailAction.BLOCK:
                 safe_chunks.append(chunk)
         chunks = safe_chunks
+        if self.settings.min_evidence_coverage > 0:
+            frequencies, total_chunks = self.store.term_document_frequencies(
+                workspace_id, topic_terms(sanitized_query)
+            )
+            evidence = assess_evidence(sanitized_query, chunks, frequencies, total_chunks)
+            if not chunks or evidence.coverage < self.settings.min_evidence_coverage:
+                log.info(
+                    "query_refused_insufficient_evidence",
+                    request_id=request_id,
+                    coverage=round(evidence.coverage, 3),
+                    missing_terms=evidence.missing_terms,
+                )
+                tracer.score("evidence_coverage", evidence.coverage)
+                return QueryResult(
+                    request_id=request_id,
+                    answer=REFUSAL_ANSWER,
+                    latency=LatencyBreakdown(
+                        total_ms=(time.perf_counter() - start) * 1000,
+                        retrieval_ms=retrieval_metrics["dense_ms"] + retrieval_metrics["sparse_ms"],
+                        db_ms=retrieval_metrics["db_ms"],
+                    ),
+                    grounded=True,
+                    sanitized_query=sanitized_query if sanitized_query != query else None,
+                    refusal=True,
+                )
         llm_result = self.llm.answer_question(sanitized_query, chunks)
         output_text, decisions = apply_guardrails(
             llm_result.text,

@@ -11,6 +11,16 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Run reproducible RAG evaluation suite.")
     parser.add_argument("--dataset", required=True)
     parser.add_argument("--out", default="benchmarks/results/eval_report.json")
+    parser.add_argument(
+        "--min-refusal-recall",
+        type=float,
+        help="Fail if fewer than this share of should-refuse cases are refused.",
+    )
+    parser.add_argument(
+        "--max-false-refusal-rate",
+        type=float,
+        help="Fail if more than this share of answerable cases are refused.",
+    )
     args = parser.parse_args()
 
     settings = get_settings()
@@ -28,6 +38,17 @@ def main() -> int:
         return 1
     if report.metrics["latency_p95_ms"] > settings.eval_p95_latency_ms_threshold:
         print("latency gate failed", file=sys.stderr)
+        return 1
+
+    if args.min_refusal_recall is not None and (
+        report.metrics.get("refusal_recall", 1.0) < args.min_refusal_recall
+    ):
+        print("refusal recall gate failed", file=sys.stderr)
+        return 1
+    if args.max_false_refusal_rate is not None and (
+        report.metrics.get("false_refusal_rate", 0.0) > args.max_false_refusal_rate
+    ):
+        print("false refusal gate failed", file=sys.stderr)
         return 1
 
     print(report.to_json())

@@ -8,6 +8,8 @@ A multi-tenant RAG API and a policy-controlled coding agent. The model proposes;
 
 [Web demo](https://grounded-agent-web.vercel.app) · [API docs](https://grounded-agent-api.vercel.app/docs)
 
+![Web demo answering a question with a cited source and the pipeline trace](docs/images/web-demo.png)
+
 ## Technology stack
 
 | Area | Technologies |
@@ -79,7 +81,15 @@ This is the expected citation format. Try the [web demo](https://grounded-agent-
 
 ## Results
 
-60-document corpus, 18 answerable questions: **recall@4 0.94**, MRR 0.72. Query p95 latency **5.4 ms** in-process. CI blocks merges on retrieval, groundedness, agent-context and latency regressions. Run `make eval-full` for the extended evaluation report and `make benchmark` for a local latency run. **The extended evaluation is informational rather than a passing CI gate** (`eval-full` ignores the evaluator's exit code); results depend on environment and dataset.
+| Measure (deterministic providers) | Result |
+| --- | --- |
+| Retrieval, 18 answerable questions over 60 documents | recall@4 **0.94**, MRR 0.72 |
+| Refusals on unsupported questions, `hr_full` | **3 of 5** (was 1 of 5) |
+| Refusals on a held-out set written before tuning | **6 of 9** (was 0 of 9) |
+| Answerable questions wrongly refused | **0 of 26** |
+| Query latency, in-process | p95 **5.9 ms** |
+
+CI runs the retrieval, groundedness, refusal, agent-context and latency gates on every pull request. The branch is not protected, so a failing run flags a change rather than blocking the merge. `make eval-full` prints the extended report; it is informational, not a gate.
 
 ## Design decisions
 
@@ -87,11 +97,12 @@ This is the expected citation format. Try the [web demo](https://grounded-agent-
 - **One Postgres for data, vectors and search:** one system to run and secure ([ADR 0002](docs/adr/0002-pgvector.md)).
 - **Policy in code, not prompts:** the reviewer agent can't write files even if its prompt is injected.
 - **Outputs are validated:** an answer must cite the documents it was given.
+- **Refuse on missing evidence:** if the retrieved text doesn't cover the question's key terms, the API declines before calling the model, so it can't guess and the call costs nothing.
 
 ## Limitations
 
-- Out-of-scope questions still get an answer (1 of 5 refusal cases pass). Next fix: a relevance threshold before generation.
-- Prompt-injection screening is regex-based and misses indirect attacks.
+- Questions near the corpus's topics but not covered by it (a sabbatical policy, military leave, the CEO's name) still get answered from the closest document. The evidence gate is lexical; catching these needs semantic embeddings or a model that reports missing context.
+- Prompt-injection screening is pattern-based. It catches direct requests for the system prompt, but not injections phrased in novel ways or hidden in documents.
 - The agent's tool policy is not an OS sandbox.
 
 ## Docs

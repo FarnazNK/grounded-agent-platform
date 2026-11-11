@@ -99,6 +99,8 @@ def run_evaluation(dataset_path: Path | str, settings: Settings) -> EvaluationRe
             )
         )
     latencies = sorted(case.metrics.latency_ms for case in cases)
+    should_refuse = [case for case in cases if case.metrics.expect_refusal]
+    should_answer = [case for case in cases if not case.metrics.expect_refusal]
     summary_metrics = {
         "retrieval_precision": mean(case.metrics.precision for case in cases),
         "retrieval_recall": mean(case.metrics.recall for case in cases),
@@ -112,6 +114,16 @@ def run_evaluation(dataset_path: Path | str, settings: Settings) -> EvaluationRe
         "token_usage_total": float(sum(case.metrics.total_tokens for case in cases)),
         "estimated_cost_usd_total": sum(case.metrics.estimated_cost_usd for case in cases),
     }
+    if should_refuse:
+        # Share of cases that should be refused and were.
+        summary_metrics["refusal_recall"] = mean(
+            1.0 if case.metrics.refused else 0.0 for case in should_refuse
+        )
+    if should_answer:
+        # Share of answerable cases that were wrongly refused.
+        summary_metrics["false_refusal_rate"] = mean(
+            1.0 if case.metrics.refused else 0.0 for case in should_answer
+        )
     return EvaluationReport(dataset_name=dataset.name, metrics=summary_metrics, cases=cases)
 
 
