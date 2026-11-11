@@ -118,15 +118,26 @@ class TestSourceCitationChecker:
         checker = SourceCitationChecker(valid_sources=frozenset({"pto.md"}))
         result = checker("Per [source: hallucinated.md] the policy is X.")
         assert result.action == GuardrailAction.SANITIZE
-        assert "[source: unverified]" in (result.sanitized_text or "")
-        assert "hallucinated.md" not in (result.sanitized_text or "")
+        assert result.sanitized_text == "Per the policy is X."
+        assert result.metadata["invalid_sources"] == ["hallucinated.md"]
 
     def test_mixed_citations_partially_sanitized(self):
         checker = SourceCitationChecker(valid_sources=frozenset({"pto.md"}))
         result = checker("Per [source: pto.md] and also [source: fake.md].")
         assert result.action == GuardrailAction.SANITIZE
-        assert "[source: pto.md]" in (result.sanitized_text or "")
-        assert "[source: unverified]" in (result.sanitized_text or "")
+        assert result.sanitized_text == "Per [source: pto.md] and also."
+        assert "unverified" not in (result.sanitized_text or "")
+
+    def test_missing_citation_is_flagged_when_required(self):
+        checker = SourceCitationChecker(valid_sources=frozenset({"pto.md"}), require_citation=True)
+        result = checker("Employees get 90 days off.")
+        assert result.action == GuardrailAction.FLAG
+        assert result.metadata == {"missing_citation": True}
+
+    def test_missing_citation_allowed_when_nothing_was_retrieved(self):
+        checker = SourceCitationChecker(require_citation=True)
+        result = checker("I could not find relevant documents.")
+        assert result.action == GuardrailAction.ALLOW
 
 
 class TestApplyGuardrails:

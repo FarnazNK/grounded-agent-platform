@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import os
 import shlex
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -81,6 +83,35 @@ def is_sensitive_path(
     return relative.suffix.lower() in DEFAULT_DENIED_SUFFIXES
 
 
+_NOFOLLOW = getattr(os, "O_NOFOLLOW", 0)
+
+
+def has_symlink(repo_root: Path, candidate: Path) -> bool:
+    """True if ``candidate`` (under an already-resolved root) passes through a symlink."""
+    lexical = Path(os.path.normpath(candidate))
+    return not lexical.is_relative_to(repo_root) or lexical != lexical.resolve()
+
+
+def read_regular_file(path: Path) -> str:
+    """Read a regular file without following a symlink at the final path component.
+
+    ``O_NOFOLLOW`` closes the window between validating a path and opening it, so a
+    file swapped for a symlink after validation cannot be read through.
+    """
+    fd = os.open(path, os.O_RDONLY | _NOFOLLOW)
+    with os.fdopen(fd, "rb") as handle:
+        if not stat.S_ISREG(os.fstat(handle.fileno()).st_mode):
+            raise PolicyViolation("Only regular files can be read.")
+        return handle.read().decode("utf-8", errors="replace")
+
+
+def write_regular_file(path: Path, content: bytes) -> None:
+    """Create or replace a regular file without following a symlink at the final component."""
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC | _NOFOLLOW, 0o644)
+    with os.fdopen(fd, "wb") as handle:
+        handle.write(content)
+
+
 @dataclass(frozen=True)
 class ToolPolicy:
     allow_writes: bool = False
@@ -100,9 +131,12 @@ class ToolPolicy:
             raise PolicyViolation("Invalid repository path.")
 
         repo_root = repo_root.resolve()
-        candidate = (repo_root / relative_path).resolve()
-        if not candidate.is_relative_to(repo_root):
+        lexical = Path(os.path.normpath(repo_root / relative_path))
+        candidate = lexical.resolve()
+        if not lexical.is_relative_to(repo_root) or not candidate.is_relative_to(repo_root):
             raise PolicyViolation("Path escapes the repository root.")
+        if candidate != lexical:
+            raise PolicyViolation("Symlinks are not allowed in repository paths.")
 
         relative = candidate.relative_to(repo_root)
         if is_sensitive_path(relative, denied_parts=self.denied_parts):

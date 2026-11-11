@@ -8,7 +8,12 @@ from typing import Any
 
 from rag_agent.agent.context import RepositoryContextBuilder
 from rag_agent.agent.models import AgentTool, ToolResult
-from rag_agent.agent.policy import PolicyViolation, ToolPolicy
+from rag_agent.agent.policy import (
+    PolicyViolation,
+    ToolPolicy,
+    read_regular_file,
+    write_regular_file,
+)
 
 ToolHandler = Callable[[dict[str, Any]], ToolResult]
 
@@ -77,7 +82,7 @@ class RepositoryToolbox:
                     success=False,
                     output="File does not exist.",
                 )
-            content = path.read_text(encoding="utf-8", errors="replace")
+            content = read_regular_file(path)
             if len(content) > self.context_builder.max_file_bytes:
                 content = content[: self.context_builder.max_file_bytes]
                 truncated = True
@@ -113,14 +118,14 @@ class RepositoryToolbox:
             relative = path.relative_to(self.repo_root).as_posix()
             try:
                 for line_number, line in enumerate(
-                    path.read_text(encoding="utf-8", errors="replace").splitlines(),
+                    read_regular_file(path).splitlines(),
                     start=1,
                 ):
                     if query_lower in line.lower():
                         matches.append(f"{relative}:{line_number}: {line[:240]}")
                         if len(matches) >= limit:
                             break
-            except OSError:
+            except (OSError, PolicyViolation):
                 continue
             if len(matches) >= limit:
                 break
@@ -141,7 +146,7 @@ class RepositoryToolbox:
             if len(encoded) > self.policy.max_write_bytes:
                 raise PolicyViolation("Write exceeds the configured size limit.")
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text(content, encoding="utf-8")
+            write_regular_file(path, encoded)
             return ToolResult(
                 tool=AgentTool.WRITE_FILE,
                 success=True,
