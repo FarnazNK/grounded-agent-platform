@@ -8,6 +8,36 @@ A multi-tenant RAG API and a policy-controlled coding agent. The model proposes;
 
 [Web demo](https://grounded-agent-web.vercel.app) · [API docs](https://grounded-agent-api.vercel.app/docs)
 
+## Try the demos
+
+**[Open the interactive web demo](https://grounded-agent-web.vercel.app)** — ask about sample documents, inspect retrieval ranks and citations, test guardrails, or add a local `.txt`/`.md` file. It runs entirely in your browser, with no sign-in or API requests.
+
+**[Explore the hosted FastAPI docs](https://grounded-agent-api.vercel.app/docs)** — see the separate, database-backed RAG API. Authenticated document and query operations require workspace access.
+
+The web demo is an interactive simulation of the deterministic RAG pipeline, **not a React client for the hosted API**. A verified screenshot has not been added yet; use the live demo link to see the real interface.
+
+## Technology stack
+
+| Area | Technologies |
+| --- | --- |
+| Backend | Python 3.11+, FastAPI, Pydantic, SQLAlchemy, Alembic |
+| Retrieval & storage | PostgreSQL, pgvector, full-text search, weighted reciprocal-rank fusion |
+| Models | Deterministic test providers; optional OpenAI and Anthropic adapters |
+| Developer agent | Repository context selection, planner/coder/reviewer workflow, tool policy, verification |
+| Web demo | React, TypeScript, Vite (browser-only) |
+| Testing & operations | pytest, Ruff, mypy, GitHub Actions, Docker, Prometheus; optional Grafana and Langfuse |
+
+## What runs where
+
+| Component | Where it runs | What it demonstrates |
+| --- | --- | --- |
+| RAG API | Hosted on Vercel; also runnable locally | Authenticated, workspace-scoped retrieval and generation backed by PostgreSQL/pgvector |
+| Web demo | Hosted static React site; runs in the visitor's browser | Interactive deterministic retrieval simulation, citations, guardrails and local-file questions; **no backend API calls** |
+| Developer agent | Local operator-controlled CLI | Policy-controlled repository tools and planner/coder/reviewer workflow; no hosted filesystem execution |
+| AWS AgentCore, gRPC, Kubernetes and monitoring examples | Optional reference/local setups | Architectural and infrastructure demos; not all are part of the hosted service |
+
+See [optional demos](docs/optional-demos.md) and [deployment notes](docs/deployment.md) for boundaries and setup details.
+
 ## Quickstart
 
 ```bash
