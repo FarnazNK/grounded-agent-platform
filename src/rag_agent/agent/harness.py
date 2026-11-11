@@ -4,12 +4,19 @@ from pathlib import Path
 from uuid import uuid4
 
 from rag_agent.agent.context import RepositoryContextBuilder
-from rag_agent.agent.models import AgentRunResult, AgentStep, AgentTool
+from rag_agent.agent.models import (
+    AgentDecision,
+    AgentRunResult,
+    AgentStep,
+    AgentTool,
+    ToolResult,
+)
 from rag_agent.agent.planner import AgentPlanner
 from rag_agent.agent.policy import ToolPolicy
-from rag_agent.agent.skills import SkillRegistry
+from rag_agent.agent.skills import AgentSkill, SkillRegistry
 from rag_agent.agent.tools import RepositoryToolbox
 from rag_agent.observability import get_logger, request_context
+from rag_agent.tracing import get_tracer
 
 logger = get_logger(__name__)
 
@@ -45,12 +52,68 @@ class DeveloperAgentHarness:
             self.repo_root / "agent_skills"
         )
 
-    def run(self, task: str, *, skill_name: str | None = None) -> AgentRunResult:
+    def run(
+        self,
+        task: str,
+        *,
+        skill_name: str | None = None,
+        skill: AgentSkill | None = None,
+        role: str = "developer",
+    ) -> AgentRunResult:
+        """Run the agent loop.
+
+        ``skill`` lets a caller (such as the multi-agent team) pass a role definition
+        directly; otherwise ``skill_name`` is looked up in ``agent_skills/``.
+        """
+        tracer = get_tracer()
+        with tracer.observe(
+            f"agent.{role}",
+            kind="agent",
+            input={"task": task},
+            metadata={"role": role, "skill": skill.name if skill else skill_name},
+        ) as span:
+            result = self._run(task, skill_name=skill_name, skill=skill, role=role)
+            span.update(
+                output={"status": result.status, "summary": result.summary},
+                metadata={
+                    "steps": len(result.steps),
+                    "changed_files": result.changed_files,
+                    "context_files": [item.path for item in result.selected_context],
+                },
+                level="DEFAULT" if result.status == "completed" else "WARNING",
+            )
+            return result
+
+    def _execute_tool(self, decision: AgentDecision) -> ToolResult:
+        tracer = get_tracer()
+        with tracer.observe(
+            f"tool.{decision.tool.value}",
+            kind="tool",
+            input=decision.arguments,
+            metadata={"reason": decision.reason},
+        ) as span:
+            result = self.registry.execute(decision.tool, decision.arguments)
+            span.update(
+                output=result.output,
+                metadata=result.metadata,
+                level="DEFAULT" if result.success else "WARNING",
+            )
+            return result
+
+    def _run(
+        self,
+        task: str,
+        *,
+        skill_name: str | None,
+        skill: AgentSkill | None,
+        role: str,
+    ) -> AgentRunResult:
         run_id = str(uuid4())
         context = self.context_builder.build(task)
         history: list[AgentStep] = []
         changed_files: set[str] = set()
-        skill = self.skills.get(skill_name)
+        if skill is None:
+            skill = self.skills.get(skill_name)
 
         if skill_name and skill is None:
             logger.warning(
@@ -77,13 +140,14 @@ class DeveloperAgentHarness:
         logger.info(
             "agent_run_started",
             run_id=run_id,
+            role=role,
             task=task,
             skill=skill.name if skill else None,
             context_files=[item.path for item in context],
             allowed_tools=[tool.value for tool in allowed_tools],
         )
 
-        with request_context(agent_run_id=run_id):
+        with request_context(agent_run_id=run_id, agent_role=role):
             for index in range(self.max_steps):
                 try:
                     decision = self.planner.decide(
@@ -149,7 +213,7 @@ class DeveloperAgentHarness:
                         skill=skill.name if skill else None,
                     )
 
-                result = self.registry.execute(decision.tool, decision.arguments)
+                result = self._execute_tool(decision)
                 history.append(
                     AgentStep(
                         index=index,

@@ -97,3 +97,42 @@ rag-agent dev-agent \
 
 Do not enable write-capable repository tools on an internet-facing API without a
 separate sandbox boundary and stronger authorization.
+
+## Multi-agent team
+
+`DeveloperAgentTeam` (`src/rag_agent/agent/team.py`, CLI `rag-agent dev-team`) composes three
+harness runs instead of one long loop:
+
+```text
+task
+  |
+  v
+planner  (read-only policy) ---------> numbered plan
+  |
+  v
+coder    (caller's policy; writes only with --allow-writes) --> changed files
+  |
+  v
+reviewer (read-only policy + checks) --> approve | request_changes
+  |                                          |
+  | approve                                  | feedback (bounded rounds)
+  v                                          v
+completed                                  back to coder
+```
+
+Design choices:
+
+- **Role boundaries are enforced by the runtime.** Each role is an `AgentSkill` with its own
+  tool allowlist, and planner/reviewer harnesses are built with `allow_writes=False`, so a
+  prompt-injected reviewer still cannot write files.
+- **Fail closed on review.** A missing or unrecognized verdict counts as
+  `request_changes`.
+- **Bounded cost.** Per-agent `max_steps`, a shared `max_total_steps` budget, and
+  `max_review_rounds`; exhausting them returns `max_steps` or `changes_requested` rather
+  than looping.
+- **Per-role models.** `role_planners` lets each role use a different planner, for example
+  a cheaper model for review.
+- **One trace per team run** when Langfuse tracing is enabled (see `docs/observability.md`).
+
+Results are returned as `TeamRunResult`: status, plan, verdict, review rounds, total steps,
+changed files, and every role's full `AgentRunResult`.

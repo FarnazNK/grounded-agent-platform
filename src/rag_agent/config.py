@@ -69,6 +69,11 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     metrics_namespace: str = "rag_agent"
     langsmith_project: str = "rag-agent"
+    tracing_backend: Literal["none", "langfuse"] = "none"
+    tracing_release: str | None = None
+
+    agent_team_max_review_rounds: int = Field(default=2, ge=1, le=5)
+    agent_team_max_total_steps: int = Field(default=40, ge=3, le=200)
 
     eval_recall_threshold: float = Field(default=0.75, ge=0.0, le=1.0)
     eval_groundedness_threshold: float = Field(default=0.90, ge=0.0, le=1.0)

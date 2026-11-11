@@ -257,6 +257,25 @@ rag-agent dev-agent \
   --task "Add validation for the new field and verify the relevant tests"
 ```
 
+### Multi-agent team: planner → coder → reviewer
+
+`rag-agent dev-team` splits a task across three agents that each run in the same policy-controlled harness with their own tool allowlist:
+
+| Agent | Tools | Job |
+|---|---|---|
+| planner | list/read/search (read-only) | inspects the repo and returns a numbered plan |
+| coder | read + `write_file` (only with `--allow-writes`) + checks | implements the plan, addresses review feedback |
+| reviewer | read-only + checks | returns `approve` or `request_changes` |
+
+Requested changes go back to the coder for up to `APP_AGENT_TEAM_MAX_REVIEW_ROUNDS` rounds, and the whole run shares a step budget (`APP_AGENT_TEAM_MAX_TOTAL_STEPS`). Planner and reviewer are built with a read-only policy, so they cannot write even when writes are enabled for the run.
+
+```bash
+rag-agent dev-team --repo . --task "Trace how request authentication is enforced"   # deterministic dry run
+rag-agent dev-team --repo . --allow-writes --task "Add validation for the new field and test it"
+```
+
+See [docs/developer-agent.md](docs/developer-agent.md#multi-agent-team).
+
 The current policy layer is defense in depth, **not an OS-level sandbox**. A production write-enabled service should add ephemeral containers or VMs, network isolation, resource limits, scoped credentials, and stronger approval/authorization controls.
 
 ## Agent evaluation
@@ -357,7 +376,22 @@ Developer-agent runs produce structured events for:
 - write activity; and
 - max-step termination.
 
-Optional LangSmith tracing can be enabled for hosted model calls by supplying the corresponding environment key.
+### LLM tracing with Langfuse (free, self-hosted)
+
+Optional [Langfuse](https://langfuse.com) tracing records every model call (prompt, output, tokens, cost, latency) inside a nested trace:
+
+- **RAG query:** `rag.query` → `retrieve` (sources + timings) → model generation, with a `grounded` score on each trace.
+- **Agent team:** `dev-team` → `agent.planner` / `agent.coder` / `agent.reviewer` → `tool.*` spans and model generations, with a `review_approved` score.
+
+```bash
+make langfuse-up                       # self-hosted Langfuse at http://localhost:3001
+pip install -e '.[tracing]'
+export APP_TRACING_BACKEND=langfuse LANGFUSE_BASE_URL=http://localhost:3001 \
+       LANGFUSE_PUBLIC_KEY=pk-lf-local-dev LANGFUSE_SECRET_KEY=sk-lf-local-dev
+rag-agent dev-team --repo . --task "Review the retrieval pipeline"
+```
+
+Tracing is off by default and fail-safe: missing keys or an unreachable server only log a warning, and exported payloads are clipped. See [docs/observability.md](docs/observability.md#llm-tracing-with-langfuse). LangSmith tracing can still be enabled by supplying `LANGSMITH_API_KEY`.
 
 ## Deployment
 
