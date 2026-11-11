@@ -61,7 +61,8 @@ jobs:
       - name: RAG evaluation gates
         run: |
           python scripts/run_evals.py --dataset data/eval_datasets/quality.yaml --out benchmarks/results/eval_report.json
-          python scripts/run_evals.py --dataset data/eval_datasets/adversarial.yaml --out benchmarks/results/adversarial_eval_report.json
+          python scripts/run_evals.py --dataset data/eval_datasets/adversarial.yaml --out benchmarks/results/adversarial_eval_report.json --min-refusal-recall 1.0
+          python scripts/run_evals.py --dataset data/eval_datasets/refusal_holdout.yaml --out benchmarks/results/refusal_holdout_report.json --min-refusal-recall 0.6 --max-false-refusal-rate 0.0
       - name: Developer-agent context gate
         run: |
           python scripts/run_agent_evals.py --threshold 0.75 --out benchmarks/results/agent_context_eval.json

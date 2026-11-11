@@ -66,3 +66,44 @@ def test_postgres_ingestion_and_query_round_trip():
     assert isinstance(result.chunks[0].chunk_id, str)
     assert isinstance(result.chunks[0].document_id, str)
     assert result.chunks[0].document_id == document.id
+
+    # Same matching rules as the in-memory store: stems match short suffixes ("back" ~
+    # "backed"), short stems need an exact word, and "pg" does not match inside "pgvector".
+    stems = ["back", "tenant", "weather", "pg", "post"]
+    frequencies, total = service.store.term_document_frequencies(membership.workspace.id, stems)
+    assert total == 1
+    assert frequencies == {"back": 1, "tenant": 1, "weather": 0, "pg": 0, "post": 0}
+    from rag_agent.store import InMemoryRAGStore
+
+    memory = InMemoryRAGStore()
+    memory_service = RAGService(memory, settings=settings.model_copy(update={"database_url": None}))
+    memory_membership = memory_service.bootstrap_admin(
+        email="m@example.com",
+        password="password123",
+        organization_slug="m",
+        organization_name="M",
+        workspace_slug="m",
+        workspace_name="M",
+    )
+    memory_user = memory.get_user_by_email("m@example.com")
+    assert memory_user is not None
+    memory_service.ingest_document(
+        user_id=memory_user.id,
+        workspace_id=memory_membership.workspace.id,
+        filename="postgres.md",
+        content_type="text/markdown",
+        data=b"PostgreSQL backed retrieval uses pgvector and tenant scoped chunks.",
+    )
+    assert memory.term_document_frequencies(memory_membership.workspace.id, stems) == (
+        frequencies,
+        total,
+    )
+
+    refused = service.query(
+        user_id=user.id,
+        workspace_id=membership.workspace.id,
+        query="What's the weather in Tokyo tomorrow?",
+        request_id="integration-refusal",
+    )
+    assert refused.refusal is True
+    assert refused.chunks == []

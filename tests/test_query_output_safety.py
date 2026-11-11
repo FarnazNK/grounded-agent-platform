@@ -20,7 +20,7 @@ class ScriptedLLM:
         return LLMResult(text=self.text, usage=UsageInfo(), latency_ms=0.0)
 
 
-def query_with(answer: str):
+def query_with(answer: str, query: str = "How many PTO days do new hires get?"):
     settings = Settings(
         app_env="test",
         jwt_secret="output-safety-secret-long-enough-123456",
@@ -50,7 +50,7 @@ def query_with(answer: str):
     return service.query(
         user_id=user.id,
         workspace_id=workspace_id,
-        query="How many PTO days do new hires get?",
+        query=query,
         request_id="req-1",
     )
 

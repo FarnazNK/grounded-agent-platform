@@ -73,6 +73,15 @@ class RAGStore(Protocol):
     def get_ingestion_job(self, job_id: str) -> IngestionJobRecord | None: ...
     def bump_workspace_index_version(self, workspace_id: str) -> WorkspaceRecord: ...
     def corpus_counts(self) -> tuple[int, int]: ...
+    def term_document_frequencies(
+        self, workspace_id: str, stems: list[str]
+    ) -> tuple[dict[str, int], int]:
+        """Number of ready chunks with a word matching each stem, and the total.
+
+        A word matches a stem when it starts with it and is at most ``STEM_MAX_EXTRA``
+        characters longer (see :func:`stem_matches`).
+        """
+        ...
 
 
 class InMemoryRAGStore:
@@ -218,6 +227,26 @@ class InMemoryRAGStore:
             key for key, value in self.chunks.items() if value.document_id == document_id
         ]:
             self.chunks.pop(chunk_id, None)
+
+    def term_document_frequencies(
+        self, workspace_id: str, stems: list[str]
+    ) -> tuple[dict[str, int], int]:
+        chunk_terms: list[set[str]] = []
+        for chunk in self.chunks.values():
+            if chunk.workspace_id != workspace_id:
+                continue
+            doc = self.documents.get(chunk.document_id)
+            if doc and doc.status == DocumentStatus.ready:
+                chunk_terms.append(set(_terms(chunk.content)))
+        return (
+            {
+                value: sum(
+                    any(stem_matches(value, word) for word in present) for present in chunk_terms
+                )
+                for value in stems
+            },
+            len(chunk_terms),
+        )
 
     def dense_search(
         self, workspace_id: str, query_embedding: list[float], limit: int
@@ -372,6 +401,26 @@ _STOP_WORDS = {
     "you",
     "your",
 }
+
+
+_STEM_SUFFIXES = ("ies", "ing", "ed", "es", "s")
+# How many extra characters a word may have beyond a stem and still count as a match.
+STEM_MAX_EXTRA = 4
+
+
+def stem(term: str) -> str:
+    """Strip one common English suffix: "backs"/"backed" -> "back", "policies" -> "polic"."""
+    for suffix in _STEM_SUFFIXES:
+        if term.endswith(suffix) and len(term) - len(suffix) >= 3:
+            return term[: -len(suffix)]
+    return term
+
+
+def stem_matches(stem_value: str, word: str) -> bool:
+    """True if ``word`` is ``stem_value`` plus at most a short suffix ("back" ~ "backed")."""
+    if len(stem_value) < 3:
+        return word == stem_value
+    return word.startswith(stem_value) and len(word) - len(stem_value) <= STEM_MAX_EXTRA
 
 
 def _terms(text: str) -> list[str]:

@@ -45,6 +45,8 @@ class Settings(BaseSettings):
     dense_retrieval_weight: float = Field(default=0.8, gt=0.0, le=5.0)
     sparse_retrieval_weight: float = Field(default=1.2, gt=0.0, le=5.0)
     min_fused_score: float = Field(default=0.15, ge=0.0, le=1.0)
+    # Refuse before generation when IDF-weighted query-term coverage is below this (0 = off).
+    min_evidence_coverage: float = Field(default=0.2, ge=0.0, le=1.0)
     chunk_size_words: int = Field(default=180, ge=20, le=2000)
     chunk_overlap_words: int = Field(default=30, ge=0, le=1000)
 

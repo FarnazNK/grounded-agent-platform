@@ -12,6 +12,8 @@ class EvalCase(BaseModel):
     expected_sources: list[str] = Field(default_factory=list)
     expected_contains: list[str] = Field(default_factory=list)
     expected_citations: list[str] = Field(default_factory=list)
+    # True when the correct behavior is to refuse (out of scope, unsupported, or an attack).
+    expect_refusal: bool = False
     tags: list[str] = Field(default_factory=list)
 
 
