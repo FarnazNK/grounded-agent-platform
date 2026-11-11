@@ -45,7 +45,7 @@ docker compose up -d --build
 docker compose exec api alembic upgrade head
 ```
 
-Then open http://localhost:8000/docs. The agent runs from the CLI:
+To run the local developer agent:
 
 ```bash
 pip install -e '.[dev]'
