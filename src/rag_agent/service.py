@@ -50,6 +50,7 @@ from rag_agent.schemas import (
     WorkspaceRecord,
 )
 from rag_agent.store import RAGStore
+from rag_agent.tracing import get_tracer
 
 log = get_logger(__name__)
 _DUMMY_PASSWORD_HASH = hash_password("rag-agent-dummy-password-not-a-real-account")
@@ -361,11 +362,51 @@ class RAGService:
         if cached is not None:
             return cached.model_copy(update={"request_id": request_id, "cached": True})
 
+        tracer = get_tracer()
+        with (
+            tracer.trace_attributes(
+                trace_name="rag.query",
+                user_id=user_id,
+                session_id=request_id,
+                tags=["rag"],
+                metadata={"workspace_id": workspace_id},
+            ),
+            tracer.observe("rag.query", kind="chain", input={"query": sanitized_query}) as span,
+        ):
+            result = self._answer_uncached(
+                workspace_id=workspace_id,
+                query=query,
+                sanitized_query=sanitized_query,
+                request_id=request_id,
+            )
+            span.update(
+                output={"answer": result.answer, "citations": result.citations},
+                metadata={
+                    "grounded": result.grounded,
+                    "chunks": len(result.chunks),
+                    "total_ms": round(result.latency.total_ms, 2),
+                },
+            )
+            tracer.score("grounded", 1.0 if result.grounded else 0.0)
+        self.retrieval_cache.set(cache_key, result)
+        return result
+
+    def _answer_uncached(
+        self, *, workspace_id: str, query: str, sanitized_query: str, request_id: str
+    ) -> QueryResult:
+        tracer = get_tracer()
         start = time.perf_counter()
         query_embedding = self.embeddings.embed_query(sanitized_query)
-        chunks, retrieval_metrics = self.retriever.retrieve(
-            workspace_id, sanitized_query, query_embedding
-        )
+        with tracer.observe(
+            "retrieve", kind="retriever", input={"query": sanitized_query}
+        ) as retrieval_span:
+            chunks, retrieval_metrics = self.retriever.retrieve(
+                workspace_id, sanitized_query, query_embedding
+            )
+            retrieval_span.update(
+                output=[chunk.source_name for chunk in chunks],
+                metadata={key: round(value, 2) for key, value in retrieval_metrics.items()},
+            )
         safe_chunks = []
         injection_detector = PromptInjectionDetector()
         for chunk in chunks:
@@ -410,5 +451,4 @@ class RAGService:
             sanitized_query=sanitized_query if sanitized_query != query else None,
             refusal=False,
         )
-        self.retrieval_cache.set(cache_key, result)
         return result

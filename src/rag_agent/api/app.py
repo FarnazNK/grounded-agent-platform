@@ -47,6 +47,7 @@ from rag_agent.db import get_session_factory, ping_database
 from rag_agent.errors import AppError, AuthenticationRequiredError, InvalidUploadError
 from rag_agent.observability import maybe_enable_langsmith, request_context
 from rag_agent.service import RAGService
+from rag_agent.tracing import get_tracer
 
 security = HTTPBearer(auto_error=False)
 _auth_windows: dict[str, deque[float]] = defaultdict(deque)
@@ -76,6 +77,7 @@ async def _lifespan(app: FastAPI):
         app.state.store = PostgresRAGStore(get_session_factory())
         app.state.service = RAGService(app.state.store, settings=app.state.settings)
     yield
+    get_tracer().flush()
 
 
 def create_app(service: RAGService | None = None) -> FastAPI:

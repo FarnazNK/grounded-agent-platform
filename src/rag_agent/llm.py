@@ -7,6 +7,7 @@ from typing import Any, Protocol
 from rag_agent.config import Settings, get_settings
 from rag_agent.errors import MalformedLLMOutputError, ProviderRateLimitError, ProviderTimeoutError
 from rag_agent.schemas import RetrievedChunk, UsageInfo
+from rag_agent.tracing import get_tracer
 
 
 @dataclass
@@ -102,8 +103,12 @@ class LangChainLLMProvider:
         return [("system", system), ("user", user)]
 
     def _invoke(self, prompt: list[tuple[str, str]]):
+        callbacks = get_tracer().langchain_callbacks()
         try:
-            return self._client.invoke(prompt)
+            return self._client.invoke(
+                prompt,
+                config={"callbacks": callbacks} if callbacks else None,
+            )
         except TimeoutError as exc:
             raise ProviderTimeoutError() from exc
         except Exception as exc:
