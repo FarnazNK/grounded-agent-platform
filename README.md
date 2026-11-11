@@ -60,9 +60,26 @@ flowchart LR
     end
 ```
 
+## Example grounded answer
+
+From the [sample PTO policy](data/sample_corpus_extended/pto_policy.md), an **illustrative** question-and-answer pair (not a captured live API response):
+
+> **Question:** How many PTO days do new hires get per year?
+>
+> **Answer:** New hires accrue 15 PTO days annually for their first two years. [source: pto_policy.md]
+
+This is the expected citation format. Try the [web demo](https://grounded-agent-web.vercel.app) for interactive examples.
+
+## Security and verification
+
+- **Tenant boundaries:** JWT authentication, workspace-role checks and workspace-scoped retrieval.
+- **Agent permissions:** read-only planner/reviewer roles, explicit write opt-in and constrained repository tools; **not an OS-level sandbox**.
+- **Output checks:** PII redaction and citation validation; citations do not prove claim-level factual support.
+- **CI:** unit and PostgreSQL integration tests, lint/type checks, retrieval and adversarial evaluations, latency benchmark, dependency scanning and Docker build.
+
 ## Results
 
-60-document corpus, 18 answerable questions: **recall@4 0.94**, MRR 0.72. Query p95 latency **5.4 ms** in-process. CI blocks merges on retrieval, groundedness, agent-context and latency regressions. Reproduce with `make eval-full benchmark`.
+60-document corpus, 18 answerable questions: **recall@4 0.94**, MRR 0.72. Query p95 latency **5.4 ms** in-process. CI blocks merges on retrieval, groundedness, agent-context and latency regressions. Run `make eval-full` for the extended evaluation report and `make benchmark` for a local latency run. **The extended evaluation is informational rather than a passing CI gate** (`eval-full` ignores the evaluator's exit code); results depend on environment and dataset.
 
 ## Design decisions
 
