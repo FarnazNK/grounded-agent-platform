@@ -8,14 +8,6 @@ A multi-tenant RAG API and a policy-controlled coding agent. The model proposes;
 
 [Web demo](https://grounded-agent-web.vercel.app) · [API docs](https://grounded-agent-api.vercel.app/docs)
 
-## Try the demos
-
-**[Open the interactive web demo](https://grounded-agent-web.vercel.app)** — ask about sample documents, inspect retrieval ranks and citations, test guardrails, or add a local `.txt`/`.md` file. It runs entirely in your browser, with no sign-in or API requests.
-
-**[Explore the hosted FastAPI docs](https://grounded-agent-api.vercel.app/docs)** — see the separate, database-backed RAG API. Authenticated document and query operations require workspace access.
-
-The web demo is an interactive simulation of the deterministic RAG pipeline, **not a React client for the hosted API**. A verified screenshot has not been added yet; use the live demo link to see the real interface.
-
 ## Technology stack
 
 | Area | Technologies |
