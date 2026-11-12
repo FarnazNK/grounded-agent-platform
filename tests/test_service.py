@@ -245,3 +245,26 @@ def test_retrieved_prompt_injection_is_not_sent_to_llm():
         request_id="safe-context",
     )
     assert "Ignore previous instructions" not in result.answer
+
+
+def test_failed_reindex_keeps_the_previous_index(seeded_app):
+    service, store = seeded_app.service, seeded_app.service.store
+    documents, _ = service.list_documents(
+        user_id=seeded_app.alice_id, workspace_id=seeded_app.alice_workspace_id
+    )
+    document = documents[0]
+    chunks_before = {c.id for c in store.chunks.values() if c.document_id == document.id}
+    assert chunks_before
+
+    service.embeddings = EmbeddingService(FailingEmbeddingProvider())
+    with pytest.raises(EmbeddingProviderError):
+        service.reindex_document(
+            user_id=seeded_app.alice_id,
+            workspace_id=seeded_app.alice_workspace_id,
+            document_id=document.id,
+        )
+
+    assert store.get_document(document.id, seeded_app.alice_workspace_id).status == "ready"
+    assert {c.id for c in store.chunks.values() if c.document_id == document.id} == chunks_before
+    failed_jobs = [j for j in store.ingestion_jobs.values() if j.operation == "reindex"]
+    assert [j.status for j in failed_jobs] == ["failed"]
