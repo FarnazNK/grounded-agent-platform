@@ -117,7 +117,7 @@ def seed(url: str, scale: float) -> None:
                 ),
                 {"slug": slug, "docs": docs, "per_doc": CHUNKS_PER_DOC, "dim": DIM},
             )
-        conn.execute(text("SET maintenance_work_mem = '1GB'"))
+        conn.execute(text("SET maintenance_work_mem = '512MB'"))
         conn.execute(
             text(
                 "CREATE INDEX ix_document_chunks_embedding ON document_chunks "

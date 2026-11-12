@@ -35,7 +35,9 @@ jobs:
           POSTGRES_PASSWORD: rag_agent
           POSTGRES_DB: rag_agent_bench
         ports: ["5432:5432"]
+        # Parallel HNSW builds use shared memory; Docker's default /dev/shm is 64 MB.
         options: >-
+          --shm-size 2g
           --health-cmd "pg_isready -U rag_agent -d rag_agent_bench"
           --health-interval 5s --health-timeout 5s --health-retries 20
     env:
