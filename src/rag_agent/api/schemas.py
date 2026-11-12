@@ -68,6 +68,8 @@ class DocumentResponse(BaseModel):
 
 class DocumentsResponse(BaseModel):
     documents: list[DocumentView]
+    # Pass as ?cursor= to fetch the next page; null on the last page.
+    next_cursor: str | None = None
 
 
 class IngestionJobResponse(BaseModel):

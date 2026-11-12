@@ -5,10 +5,11 @@ import re
 import threading
 from collections import Counter
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Protocol
 
-from rag_agent.errors import DatabaseUnavailableError
+from rag_agent.errors import DatabaseUnavailableError, DocumentNotFoundError
 from rag_agent.schemas import (
     ChunkRecord,
     DocumentRecord,
@@ -22,6 +23,28 @@ from rag_agent.schemas import (
     WorkspaceMembership,
     WorkspaceRecord,
 )
+
+# Documents that count for duplicate detection. Failed uploads are excluded so the same
+# file can be retried; deleted documents are excluded so it can be re-added.
+ACTIVE_DOCUMENT_STATUSES = frozenset(
+    {DocumentStatus.pending, DocumentStatus.processing, DocumentStatus.ready}
+)
+
+
+@dataclass(frozen=True)
+class DocumentCursor:
+    """Position after the last document of a page: its (created_at, id) sort key."""
+
+    created_at: datetime
+    id: str
+
+
+class DuplicateDocumentConflict(Exception):
+    """Raised by ``publish_document`` when an active document has the same content."""
+
+    def __init__(self, existing_document_id: str) -> None:
+        super().__init__(existing_document_id)
+        self.existing_document_id = existing_document_id
 
 
 class RAGStore(Protocol):
@@ -51,17 +74,55 @@ class RAGStore(Protocol):
     def get_membership(self, user_id: str, workspace_id: str) -> MembershipRecord | None: ...
     def list_user_workspaces(self, user_id: str) -> list[WorkspaceMembership]: ...
     def get_workspace(self, workspace_id: str) -> WorkspaceRecord | None: ...
-    def create_document(self, record: DocumentRecord) -> DocumentRecord: ...
-    def update_document(self, document_id: str, **updates) -> DocumentRecord: ...
     def get_document(self, document_id: str, workspace_id: str) -> DocumentRecord | None: ...
-    def list_documents(self, workspace_id: str) -> list[DocumentRecord]: ...
+    def list_documents(
+        self, workspace_id: str, *, limit: int, after: DocumentCursor | None = None
+    ) -> list[DocumentRecord]:
+        """Documents ordered by (created_at, id), starting after ``after`` (keyset paging)."""
+        ...
+
     def find_active_document_by_sha(
         self, workspace_id: str, sha256: str
     ) -> DocumentRecord | None: ...
-    def replace_document_chunks(
-        self, document_id: str, workspace_id: str, chunks: list[ChunkRecord], embedding_model: str
-    ) -> None: ...
-    def delete_document_chunks(self, document_id: str) -> None: ...
+    def publish_document(
+        self,
+        document: DocumentRecord,
+        chunks: list[ChunkRecord],
+        job: IngestionJobRecord,
+        embedding_model: str,
+    ) -> tuple[DocumentRecord, IngestionJobRecord]:
+        """In one transaction: insert a ready document, its chunks and a completed job, and
+        bump the workspace index version. Raises :class:`DuplicateDocumentConflict` if an
+        active document with the same content already exists in the workspace."""
+        ...
+
+    def record_failed_document(
+        self, document: DocumentRecord, job: IngestionJobRecord
+    ) -> tuple[DocumentRecord, IngestionJobRecord]:
+        """In one transaction: insert a failed document and its failed job."""
+        ...
+
+    def replace_document_index(
+        self,
+        document_id: str,
+        workspace_id: str,
+        chunks: list[ChunkRecord],
+        job: IngestionJobRecord,
+        embedding_model: str,
+        metadata: dict,
+    ) -> tuple[DocumentRecord, IngestionJobRecord]:
+        """In one transaction, with the document row locked: swap in new chunks, mark the
+        document ready, record the job and bump the index version. Raises
+        :class:`DocumentNotFoundError` if the document is missing or deleted."""
+        ...
+
+    def delete_document(
+        self, document_id: str, workspace_id: str, job: IngestionJobRecord
+    ) -> tuple[DocumentRecord, IngestionJobRecord]:
+        """In one transaction, with the document row locked: remove its chunks, mark it
+        deleted, record the job and bump the index version."""
+        ...
+
     def dense_search(
         self, workspace_id: str, query_embedding: list[float], limit: int
     ) -> tuple[list[RetrievedChunk], float]: ...
@@ -69,9 +130,7 @@ class RAGStore(Protocol):
         self, workspace_id: str, query: str, limit: int
     ) -> tuple[list[RetrievedChunk], float]: ...
     def create_ingestion_job(self, record: IngestionJobRecord) -> IngestionJobRecord: ...
-    def update_ingestion_job(self, job_id: str, **updates) -> IngestionJobRecord: ...
     def get_ingestion_job(self, job_id: str) -> IngestionJobRecord | None: ...
-    def bump_workspace_index_version(self, workspace_id: str) -> WorkspaceRecord: ...
     def corpus_counts(self) -> tuple[int, int]: ...
     def term_document_frequencies(
         self, workspace_id: str, stems: list[str]
@@ -95,6 +154,8 @@ class InMemoryRAGStore:
         self.ingestion_jobs: dict[str, IngestionJobRecord] = {}
         self.available = True
         self._bootstrap_lock = threading.Lock()
+        # Serializes multi-step writes, standing in for a database transaction.
+        self._write_lock = threading.RLock()
 
     def ping(self) -> None:
         if not self.available:
@@ -181,52 +242,122 @@ class InMemoryRAGStore:
     def get_workspace(self, workspace_id: str) -> WorkspaceRecord | None:
         return deepcopy(self.workspaces.get(workspace_id))
 
-    def create_document(self, record: DocumentRecord) -> DocumentRecord:
-        self.documents[record.id] = deepcopy(record)
-        return deepcopy(record)
-
-    def update_document(self, document_id: str, **updates) -> DocumentRecord:
-        record = self.documents[document_id].model_copy(deep=True)
-        data = record.model_dump()
-        data.update(updates)
-        data["updated_at"] = datetime.now(UTC)
-        updated = DocumentRecord.model_validate(data)
-        self.documents[document_id] = updated
-        return deepcopy(updated)
-
     def get_document(self, document_id: str, workspace_id: str) -> DocumentRecord | None:
         record = self.documents.get(document_id)
         if record and record.workspace_id == workspace_id:
             return deepcopy(record)
         return None
 
-    def list_documents(self, workspace_id: str) -> list[DocumentRecord]:
-        return [
-            deepcopy(doc) for doc in self.documents.values() if doc.workspace_id == workspace_id
-        ]
+    def list_documents(
+        self, workspace_id: str, *, limit: int, after: DocumentCursor | None = None
+    ) -> list[DocumentRecord]:
+        documents = sorted(
+            (doc for doc in self.documents.values() if doc.workspace_id == workspace_id),
+            key=lambda doc: (doc.created_at, doc.id),
+        )
+        if after is not None:
+            documents = [
+                doc for doc in documents if (doc.created_at, doc.id) > (after.created_at, after.id)
+            ]
+        return [deepcopy(doc) for doc in documents[:limit]]
 
     def find_active_document_by_sha(self, workspace_id: str, sha256: str) -> DocumentRecord | None:
         for record in self.documents.values():
             if (
                 record.workspace_id == workspace_id
                 and record.sha256 == sha256
-                and record.status != DocumentStatus.deleted
+                and record.status in ACTIVE_DOCUMENT_STATUSES
             ):
                 return deepcopy(record)
         return None
 
-    def replace_document_chunks(
-        self, document_id: str, workspace_id: str, chunks: list[ChunkRecord], embedding_model: str
-    ) -> None:
-        self.delete_document_chunks(document_id)
-        for chunk in chunks:
-            self.chunks[chunk.id] = deepcopy(chunk)
+    def publish_document(
+        self,
+        document: DocumentRecord,
+        chunks: list[ChunkRecord],
+        job: IngestionJobRecord,
+        embedding_model: str,
+    ) -> tuple[DocumentRecord, IngestionJobRecord]:
+        with self._write_lock:
+            existing = self.find_active_document_by_sha(document.workspace_id, document.sha256)
+            if existing is not None:
+                raise DuplicateDocumentConflict(existing.id)
+            self.documents[document.id] = deepcopy(document)
+            for chunk in chunks:
+                self.chunks[chunk.id] = deepcopy(chunk)
+            self.ingestion_jobs[job.id] = deepcopy(job)
+            self._bump_index_version(document.workspace_id)
+            return deepcopy(document), deepcopy(job)
 
-    def delete_document_chunks(self, document_id: str) -> None:
+    def record_failed_document(
+        self, document: DocumentRecord, job: IngestionJobRecord
+    ) -> tuple[DocumentRecord, IngestionJobRecord]:
+        with self._write_lock:
+            self.documents[document.id] = deepcopy(document)
+            self.ingestion_jobs[job.id] = deepcopy(job)
+            return deepcopy(document), deepcopy(job)
+
+    def replace_document_index(
+        self,
+        document_id: str,
+        workspace_id: str,
+        chunks: list[ChunkRecord],
+        job: IngestionJobRecord,
+        embedding_model: str,
+        metadata: dict,
+    ) -> tuple[DocumentRecord, IngestionJobRecord]:
+        with self._write_lock:
+            current = self.documents.get(document_id)
+            if (
+                current is None
+                or current.workspace_id != workspace_id
+                or current.status == DocumentStatus.deleted
+            ):
+                raise DocumentNotFoundError(document_id)
+            self._delete_chunks(document_id)
+            for chunk in chunks:
+                self.chunks[chunk.id] = deepcopy(chunk)
+            updated = current.model_copy(
+                update={
+                    "status": DocumentStatus.ready,
+                    "metadata": metadata,
+                    "error_code": None,
+                    "error_message": None,
+                    "updated_at": datetime.now(UTC),
+                }
+            )
+            self.documents[document_id] = updated
+            self.ingestion_jobs[job.id] = deepcopy(job)
+            self._bump_index_version(workspace_id)
+            return deepcopy(updated), deepcopy(job)
+
+    def delete_document(
+        self, document_id: str, workspace_id: str, job: IngestionJobRecord
+    ) -> tuple[DocumentRecord, IngestionJobRecord]:
+        with self._write_lock:
+            current = self.documents.get(document_id)
+            if current is None or current.workspace_id != workspace_id:
+                raise DocumentNotFoundError(document_id)
+            self._delete_chunks(document_id)
+            updated = current.model_copy(
+                update={"status": DocumentStatus.deleted, "updated_at": datetime.now(UTC)}
+            )
+            self.documents[document_id] = updated
+            self.ingestion_jobs[job.id] = deepcopy(job)
+            self._bump_index_version(workspace_id)
+            return deepcopy(updated), deepcopy(job)
+
+    def _delete_chunks(self, document_id: str) -> None:
         for chunk_id in [
             key for key, value in self.chunks.items() if value.document_id == document_id
         ]:
             self.chunks.pop(chunk_id, None)
+
+    def _bump_index_version(self, workspace_id: str) -> None:
+        workspace = self.workspaces[workspace_id]
+        self.workspaces[workspace_id] = workspace.model_copy(
+            update={"index_version": workspace.index_version + 1}
+        )
 
     def term_document_frequencies(
         self, workspace_id: str, stems: list[str]
@@ -331,24 +462,9 @@ class InMemoryRAGStore:
         self.ingestion_jobs[record.id] = deepcopy(record)
         return deepcopy(record)
 
-    def update_ingestion_job(self, job_id: str, **updates) -> IngestionJobRecord:
-        record = self.ingestion_jobs[job_id].model_copy(deep=True)
-        data = record.model_dump()
-        data.update(updates)
-        data["updated_at"] = datetime.now(UTC)
-        updated = IngestionJobRecord.model_validate(data)
-        self.ingestion_jobs[job_id] = updated
-        return deepcopy(updated)
-
     def get_ingestion_job(self, job_id: str) -> IngestionJobRecord | None:
         record = self.ingestion_jobs.get(job_id)
         return deepcopy(record) if record else None
-
-    def bump_workspace_index_version(self, workspace_id: str) -> WorkspaceRecord:
-        workspace = self.workspaces[workspace_id]
-        updated = workspace.model_copy(update={"index_version": workspace.index_version + 1})
-        self.workspaces[workspace_id] = updated
-        return deepcopy(updated)
 
     def corpus_counts(self) -> tuple[int, int]:
         document_count = sum(

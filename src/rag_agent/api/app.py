@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from functools import partial
 from uuid import uuid4
 
-from fastapi import Depends, FastAPI, File, Request, Response, UploadFile
+from fastapi import Depends, FastAPI, File, Query, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from starlette.concurrency import run_in_threadpool
@@ -240,11 +240,20 @@ def create_app(service: RAGService | None = None) -> FastAPI:
     @app.get("/v1/documents", response_model=DocumentsResponse)
     def list_documents(
         workspace_id: str,
+        limit: int = Query(default=50, ge=1, le=200, description="Page size."),
+        cursor: str | None = Query(
+            default=None, description="next_cursor from the previous page; omit for the first."
+        ),
         user=Depends(current_user),
         svc: RAGService = Depends(get_service),
     ):
-        documents = svc.list_documents(user_id=user.id, workspace_id=workspace_id)
-        return DocumentsResponse(documents=[DocumentView.model_validate(doc) for doc in documents])
+        documents, next_cursor = svc.list_documents(
+            user_id=user.id, workspace_id=workspace_id, limit=limit, cursor=cursor
+        )
+        return DocumentsResponse(
+            documents=[DocumentView.model_validate(doc) for doc in documents],
+            next_cursor=next_cursor,
+        )
 
     @app.get("/v1/documents/{document_id}", response_model=DocumentResponse)
     def get_document(

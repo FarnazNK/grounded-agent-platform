@@ -3,11 +3,11 @@ from __future__ import annotations
 import time
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, select, text, update
-from sqlalchemy.exc import OperationalError
+from sqlalchemy import delete, func, literal, select, text, tuple_, update
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
-from rag_agent.errors import DatabaseUnavailableError
+from rag_agent.errors import DatabaseUnavailableError, DocumentNotFoundError
 from rag_agent.models import (
     Document,
     DocumentChunk,
@@ -30,15 +30,31 @@ from rag_agent.schemas import (
     WorkspaceMembership,
     WorkspaceRecord,
 )
-from rag_agent.store import STEM_MAX_EXTRA
+from rag_agent.store import (
+    STEM_MAX_EXTRA,
+    DocumentCursor,
+    DuplicateDocumentConflict,
+)
 
 # Arbitrary constant identifying the bootstrap critical section.
 _BOOTSTRAP_LOCK_KEY = 7_041_202_611
+
+# Matches the predicate of the partial unique index, so lookups can use it.
+_ACTIVE_SHA_INDEX = "uq_documents_workspace_sha_active"
+_ACTIVE_DOCUMENT_PREDICATE = Document.status.not_in(
+    (DocumentStatus.deleted.value, DocumentStatus.failed.value)
+)
+
+
+def _constraint_name(exc: IntegrityError) -> str | None:
+    diag = getattr(exc.orig, "diag", None)
+    return getattr(diag, "constraint_name", None)
 
 
 class PostgresRAGStore:
     def __init__(self, session_factory: sessionmaker[Session]) -> None:
         self._session_factory = session_factory
+        self._pgvector_version: tuple[int, ...] | None = None
 
     def _session(self) -> Session:
         return self._session_factory()
@@ -233,48 +249,6 @@ class PostgresRAGStore:
 
         return self._run(inner)
 
-    def create_document(self, record: DocumentRecord) -> DocumentRecord:
-        def inner():
-            with self._session() as session:
-                document = Document(
-                    id=record.id,
-                    workspace_id=record.workspace_id,
-                    created_by_user_id=record.created_by_user_id,
-                    source_name=record.source_name,
-                    media_type=record.media_type,
-                    file_size=record.file_size,
-                    sha256=record.sha256,
-                    status=record.status.value,
-                    content_text=record.content_text,
-                    document_metadata=record.metadata,
-                    error_code=record.error_code,
-                    error_message=record.error_message,
-                )
-                session.add(document)
-                session.commit()
-                session.refresh(document)
-                return self._document_record(document)
-
-        return self._run(inner)
-
-    def update_document(self, document_id: str, **updates) -> DocumentRecord:
-        def inner():
-            with self._session() as session:
-                if "status" in updates and hasattr(updates["status"], "value"):
-                    updates["status"] = updates["status"].value
-                if "metadata" in updates:
-                    updates["document_metadata"] = updates.pop("metadata")
-                updates["updated_at"] = datetime.now(UTC)
-                session.execute(
-                    update(Document).where(Document.id == document_id).values(**updates)
-                )
-                session.commit()
-                document = session.get(Document, document_id)
-                assert document is not None
-                return self._document_record(document)
-
-        return self._run(inner)
-
     def get_document(self, document_id: str, workspace_id: str) -> DocumentRecord | None:
         def inner():
             with self._session() as session:
@@ -287,13 +261,24 @@ class PostgresRAGStore:
 
         return self._run(inner)
 
-    def list_documents(self, workspace_id: str) -> list[DocumentRecord]:
+    def list_documents(
+        self, workspace_id: str, *, limit: int, after: DocumentCursor | None = None
+    ) -> list[DocumentRecord]:
         def inner():
+            query = select(Document).where(Document.workspace_id == workspace_id)
+            if after is not None:
+                # Row comparison matches ix_documents_workspace_created_id, so each page
+                # is an index range scan however deep the client has paged.
+                query = query.where(
+                    tuple_(Document.created_at, Document.id)
+                    > tuple_(
+                        literal(after.created_at, Document.created_at.type),
+                        literal(after.id, Document.id.type),
+                    )
+                )
+            query = query.order_by(Document.created_at, Document.id).limit(limit)
             with self._session() as session:
-                docs = session.scalars(
-                    select(Document).where(Document.workspace_id == workspace_id)
-                ).all()
-                return [self._document_record(doc) for doc in docs]
+                return [self._document_record(doc) for doc in session.scalars(query).all()]
 
         return self._run(inner)
 
@@ -304,66 +289,209 @@ class PostgresRAGStore:
                     select(Document).where(
                         Document.workspace_id == workspace_id,
                         Document.sha256 == sha256,
-                        Document.status != DocumentStatus.deleted.value,
+                        _ACTIVE_DOCUMENT_PREDICATE,
                     )
                 )
                 return self._document_record(document) if document else None
 
         return self._run(inner)
 
-    def replace_document_chunks(
-        self, document_id: str, workspace_id: str, chunks: list[ChunkRecord], embedding_model: str
-    ) -> None:
+    def publish_document(
+        self,
+        document: DocumentRecord,
+        chunks: list[ChunkRecord],
+        job: IngestionJobRecord,
+        embedding_model: str,
+    ) -> tuple[DocumentRecord, IngestionJobRecord]:
         def inner():
-            with self._session() as session:
+            try:
+                with self._session() as session, session.begin():
+                    row = self._document_model(document)
+                    session.add(row)
+                    # Flush first so a concurrent duplicate fails here, before the chunks
+                    # are written; the partial unique index is the arbiter.
+                    session.flush()
+                    session.add_all(self._chunk_model(chunk, embedding_model) for chunk in chunks)
+                    job_row = self._job_model(job)
+                    session.add(job_row)
+                    self._bump_index_version(session, document.workspace_id)
+                    session.flush()
+                    session.refresh(row)
+                    return self._document_record(row), self._job_record(job_row)
+            except IntegrityError as exc:
+                if _constraint_name(exc) != _ACTIVE_SHA_INDEX:
+                    raise
+            existing = self.find_active_document_by_sha(document.workspace_id, document.sha256)
+            raise DuplicateDocumentConflict(existing.id if existing else "")
+
+        return self._run(inner)
+
+    def record_failed_document(
+        self, document: DocumentRecord, job: IngestionJobRecord
+    ) -> tuple[DocumentRecord, IngestionJobRecord]:
+        def inner():
+            with self._session() as session, session.begin():
+                row = self._document_model(document)
+                job_row = self._job_model(job)
+                session.add_all([row, job_row])
+                session.flush()
+                session.refresh(row)
+                return self._document_record(row), self._job_record(job_row)
+
+        return self._run(inner)
+
+    def replace_document_index(
+        self,
+        document_id: str,
+        workspace_id: str,
+        chunks: list[ChunkRecord],
+        job: IngestionJobRecord,
+        embedding_model: str,
+        metadata: dict,
+    ) -> tuple[DocumentRecord, IngestionJobRecord]:
+        def inner():
+            with self._session() as session, session.begin():
+                row = self._lock_document(session, document_id, workspace_id)
+                if row is None or row.status == DocumentStatus.deleted.value:
+                    raise DocumentNotFoundError(document_id)
                 session.execute(
                     delete(DocumentChunk).where(DocumentChunk.document_id == document_id)
                 )
-                for chunk in chunks:
-                    session.add(
-                        DocumentChunk(
-                            id=chunk.id,
-                            document_id=document_id,
-                            workspace_id=workspace_id,
-                            chunk_index=chunk.chunk_index,
-                            content=chunk.content,
-                            token_count=chunk.token_count,
-                            embedding=chunk.embedding,
-                            embedding_model=embedding_model,
-                            chunk_metadata=chunk.metadata,
-                        )
-                    )
-                session.commit()
+                session.add_all(self._chunk_model(chunk, embedding_model) for chunk in chunks)
+                row.status = DocumentStatus.ready.value
+                row.document_metadata = metadata
+                row.error_code = None
+                row.error_message = None
+                row.updated_at = datetime.now(UTC)
+                job_row = self._job_model(job)
+                session.add(job_row)
+                self._bump_index_version(session, workspace_id)
+                session.flush()
+                return self._document_record(row), self._job_record(job_row)
 
-        self._run(inner)
+        return self._run(inner)
 
-    def delete_document_chunks(self, document_id: str) -> None:
-        self._run(lambda: self._delete_chunks(document_id))
+    def delete_document(
+        self, document_id: str, workspace_id: str, job: IngestionJobRecord
+    ) -> tuple[DocumentRecord, IngestionJobRecord]:
+        def inner():
+            with self._session() as session, session.begin():
+                row = self._lock_document(session, document_id, workspace_id)
+                if row is None:
+                    raise DocumentNotFoundError(document_id)
+                session.execute(
+                    delete(DocumentChunk).where(DocumentChunk.document_id == document_id)
+                )
+                row.status = DocumentStatus.deleted.value
+                row.updated_at = datetime.now(UTC)
+                job_row = self._job_model(job)
+                session.add(job_row)
+                self._bump_index_version(session, workspace_id)
+                session.flush()
+                return self._document_record(row), self._job_record(job_row)
 
-    def _delete_chunks(self, document_id: str) -> None:
-        with self._session() as session:
-            session.execute(delete(DocumentChunk).where(DocumentChunk.document_id == document_id))
-            session.commit()
+        return self._run(inner)
+
+    @staticmethod
+    def _lock_document(session: Session, document_id: str, workspace_id: str) -> Document | None:
+        """Row-lock the document so reindex and delete of the same document serialize."""
+        return session.scalar(
+            select(Document)
+            .where(Document.id == document_id, Document.workspace_id == workspace_id)
+            .with_for_update()
+        )
+
+    @staticmethod
+    def _bump_index_version(session: Session, workspace_id: str) -> None:
+        session.execute(
+            update(Workspace)
+            .where(Workspace.id == workspace_id)
+            .values(index_version=Workspace.index_version + 1, updated_at=datetime.now(UTC))
+        )
+
+    @staticmethod
+    def _document_model(record: DocumentRecord) -> Document:
+        return Document(
+            id=record.id,
+            workspace_id=record.workspace_id,
+            created_by_user_id=record.created_by_user_id,
+            source_name=record.source_name,
+            media_type=record.media_type,
+            file_size=record.file_size,
+            sha256=record.sha256,
+            status=record.status.value,
+            content_text=record.content_text,
+            document_metadata=record.metadata,
+            error_code=record.error_code,
+            error_message=record.error_message,
+        )
+
+    @staticmethod
+    def _chunk_model(chunk: ChunkRecord, embedding_model: str) -> DocumentChunk:
+        return DocumentChunk(
+            id=chunk.id,
+            document_id=chunk.document_id,
+            workspace_id=chunk.workspace_id,
+            chunk_index=chunk.chunk_index,
+            content=chunk.content,
+            token_count=chunk.token_count,
+            embedding=chunk.embedding,
+            embedding_model=embedding_model,
+            chunk_metadata=chunk.metadata,
+        )
+
+    @staticmethod
+    def _job_model(record: IngestionJobRecord) -> IngestionJob:
+        return IngestionJob(
+            id=record.id,
+            workspace_id=record.workspace_id,
+            requested_by_user_id=record.requested_by_user_id,
+            document_id=record.document_id,
+            operation=record.operation,
+            status=record.status.value,
+            attempt_count=record.attempt_count,
+            error_code=record.error_code,
+            error_message=record.error_message,
+            completed_at=record.completed_at,
+        )
 
     def dense_search(
         self, workspace_id: str, query_embedding: list[float], limit: int
     ) -> tuple[list[RetrievedChunk], float]:
+        """Nearest chunks within one workspace.
+
+        The HNSW index spans every workspace, and the tenant filter applies to what the index
+        returns. Without iterative scans, pgvector stops after ``hnsw.ef_search`` candidates
+        (40 by default), so a workspace holding a small share of a large table can get fewer
+        results than requested, often none. On pgvector 0.8+ ``hnsw.iterative_scan`` keeps
+        scanning until ``limit`` rows pass the filter. ``relaxed_order`` may return them
+        slightly out of order, so the outer query re-sorts by distance.
+        """
         vector_literal = "[" + ",".join(f"{value:.8f}" for value in query_embedding) + "]"
         sql = text(
             """
-            SELECT c.id, c.document_id, d.source_name, c.content, c.chunk_metadata,
-                   1 - (c.embedding <=> CAST(:embedding AS vector)) AS score
-            FROM document_chunks c
-            JOIN documents d ON d.id = c.document_id
-            WHERE c.workspace_id = :workspace_id AND d.status = 'ready'
-            ORDER BY c.embedding <=> CAST(:embedding AS vector)
-            LIMIT :limit
+            WITH nearest AS MATERIALIZED (
+                SELECT c.id, c.document_id, c.content, c.chunk_metadata,
+                       c.embedding <=> CAST(:embedding AS vector) AS distance
+                FROM document_chunks c
+                WHERE c.workspace_id = :workspace_id
+                ORDER BY c.embedding <=> CAST(:embedding AS vector)
+                LIMIT :limit
+            )
+            SELECT n.id, n.document_id, d.source_name, n.content, n.chunk_metadata,
+                   1 - n.distance AS score
+            FROM nearest n
+            JOIN documents d ON d.id = n.document_id
+            WHERE d.status = 'ready'
+            ORDER BY n.distance
             """
         )
 
         def inner():
             start = time.perf_counter()
-            with self._session() as session:
+            with self._session() as session, session.begin():
+                if self._supports_iterative_scan(session):
+                    session.execute(text("SET LOCAL hnsw.iterative_scan = relaxed_order"))
                 rows = (
                     session.execute(
                         sql,
@@ -387,6 +515,17 @@ class PostgresRAGStore:
             ], latency_ms
 
         return self._run(inner)
+
+    def _supports_iterative_scan(self, session: Session) -> bool:
+        """pgvector 0.8 added hnsw.iterative_scan; older versions reject the setting."""
+        if self._pgvector_version is None:
+            version = session.scalar(
+                text("SELECT extversion FROM pg_extension WHERE extname = 'vector'")
+            )
+            self._pgvector_version = tuple(
+                int(part) for part in str(version or "0").split(".")[:3] if part.isdigit()
+            )
+        return self._pgvector_version >= (0, 8, 0)
 
     def lexical_search(
         self, workspace_id: str, query: str, limit: int
@@ -436,38 +575,10 @@ class PostgresRAGStore:
 
     def create_ingestion_job(self, record: IngestionJobRecord) -> IngestionJobRecord:
         def inner():
-            with self._session() as session:
-                job = IngestionJob(
-                    id=record.id,
-                    workspace_id=record.workspace_id,
-                    requested_by_user_id=record.requested_by_user_id,
-                    document_id=record.document_id,
-                    operation=record.operation,
-                    status=record.status.value,
-                    attempt_count=record.attempt_count,
-                    error_code=record.error_code,
-                    error_message=record.error_message,
-                    completed_at=record.completed_at,
-                )
+            with self._session() as session, session.begin():
+                job = self._job_model(record)
                 session.add(job)
-                session.commit()
-                session.refresh(job)
-                return self._job_record(job)
-
-        return self._run(inner)
-
-    def update_ingestion_job(self, job_id: str, **updates) -> IngestionJobRecord:
-        def inner():
-            with self._session() as session:
-                if "status" in updates and hasattr(updates["status"], "value"):
-                    updates["status"] = updates["status"].value
-                updates["updated_at"] = datetime.now(UTC)
-                session.execute(
-                    update(IngestionJob).where(IngestionJob.id == job_id).values(**updates)
-                )
-                session.commit()
-                job = session.get(IngestionJob, job_id)
-                assert job is not None
+                session.flush()
                 return self._job_record(job)
 
         return self._run(inner)
@@ -480,59 +591,42 @@ class PostgresRAGStore:
 
         return self._run(inner)
 
-    def bump_workspace_index_version(self, workspace_id: str) -> WorkspaceRecord:
-        def inner():
-            with self._session() as session:
-                session.execute(
-                    update(Workspace)
-                    .where(Workspace.id == workspace_id)
-                    .values(index_version=Workspace.index_version + 1, updated_at=datetime.now(UTC))
-                )
-                session.commit()
-                workspace = session.get(Workspace, workspace_id)
-                assert workspace is not None
-                return WorkspaceRecord.model_validate(workspace)
-
-        return self._run(inner)
-
     def term_document_frequencies(
         self, workspace_id: str, stems: list[str]
     ) -> tuple[dict[str, int], int]:
         """Chunk frequency of each stem, matching the in-memory store's ``stem_matches``.
 
-        Stems are lowercase ``[a-z0-9]+`` tokens, so they are safe inside a regex. ``\\m`` and
-        ``\\M`` are PostgreSQL word boundaries; a word matches when it is the stem plus at most
-        ``STEM_MAX_EXTRA`` more characters. This scans the workspace's chunks once per stem,
-        which is fine for small corpora; a term-statistics table would replace it at scale.
+        The full-text GIN index (``ix_document_chunks_fts``) first narrows each count to
+        chunks with a lexeme starting with the stem (``stem:*``); the exact word-boundary
+        regex then runs only on those candidates. A word whose English lexeme is shorter
+        than the stem ("running" -> "run" for stem "runn") is missed, which only lowers
+        that term's frequency. Stems are lowercase ``[a-z0-9]+``, safe in both tsquery and
+        regex syntax. Chunks exist only for ready documents, so no join is needed.
         """
         sql = text(
             r"""
-            WITH ready AS (
-                SELECT c.content
-                FROM document_chunks c
-                JOIN documents d ON d.id = c.document_id
-                WHERE c.workspace_id = :workspace_id AND d.status = 'ready'
-            )
             SELECT t.stem,
-                   (SELECT count(*) FROM ready
-                     WHERE content ~* CASE WHEN length(t.stem) < 3
-                                           THEN '\m' || t.stem || '\M'
-                                           ELSE '\m' || t.stem || '[a-z0-9]{0,' || :extra || '}\M'
-                                      END) AS df,
-                   (SELECT count(*) FROM ready) AS total
+                   (SELECT count(*)
+                      FROM document_chunks c
+                     WHERE c.workspace_id = :workspace_id
+                       AND to_tsvector('english', c.content)
+                           @@ to_tsquery('english', t.stem || ':*')
+                       AND c.content ~* CASE
+                             WHEN length(t.stem) < 3 THEN '\m' || t.stem || '\M'
+                             ELSE '\m' || t.stem || '[a-z0-9]{0,' || :extra || '}\M'
+                           END) AS df
             FROM unnest(CAST(:stems AS text[])) AS t(stem)
             """
         )
+        total_sql = text("SELECT count(*) FROM document_chunks WHERE workspace_id = :workspace_id")
 
         def inner():
             if not stems:
                 return {}, 0
+            params = {"workspace_id": workspace_id, "stems": list(stems), "extra": STEM_MAX_EXTRA}
             with self._session() as session:
-                rows = session.execute(
-                    sql,
-                    {"workspace_id": workspace_id, "stems": list(stems), "extra": STEM_MAX_EXTRA},
-                ).all()
-            total = int(rows[0].total) if rows else 0
+                rows = session.execute(sql, params).all()
+                total = int(session.scalar(total_sql, {"workspace_id": workspace_id}) or 0)
             return {row.stem: int(row.df) for row in rows}, total
 
         return self._run(inner)

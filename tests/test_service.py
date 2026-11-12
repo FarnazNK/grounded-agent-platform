@@ -3,7 +3,7 @@ from __future__ import annotations
 import pytest
 
 from rag_agent.config import Settings
-from rag_agent.embeddings import EmbeddingService
+from rag_agent.embeddings import EmbeddingService, build_embedding_service
 from rag_agent.errors import (
     EmbeddingProviderError,
     MalformedLLMOutputError,
@@ -82,7 +82,7 @@ def test_cache_hit_and_invalidation(seeded_app):
 
     document = seeded_app.service.list_documents(
         user_id=seeded_app.alice_id, workspace_id=seeded_app.alice_workspace_id
-    )[0]
+    )[0][0]
     seeded_app.service.reindex_document(
         user_id=seeded_app.alice_id,
         workspace_id=seeded_app.alice_workspace_id,
@@ -126,8 +126,19 @@ def test_embedding_failure_marks_ingestion_failed():
             content_type="text/markdown",
             data=b"hello world",
         )
-    document = service.list_documents(user_id=user_id, workspace_id=membership.workspace.id)[0]
-    assert document.status == "failed"
+    documents, _ = service.list_documents(user_id=user_id, workspace_id=membership.workspace.id)
+    assert [document.status for document in documents] == ["failed"]
+    # A failed upload must not block a retry of the same file.
+    service.embeddings = build_embedding_service(service.settings)
+    retried, job = service.ingest_document(
+        user_id=user_id,
+        workspace_id=membership.workspace.id,
+        filename="broken.md",
+        content_type="text/markdown",
+        data=b"hello world",
+    )
+    assert retried.status == "ready"
+    assert job.status == "completed"
 
 
 def test_llm_timeout_bubbles_up(seeded_app):

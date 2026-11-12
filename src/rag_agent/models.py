@@ -15,6 +15,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -100,7 +101,17 @@ class Document(Base, TimestampMixin):
     __tablename__ = "documents"
     __table_args__ = (
         Index("ix_documents_workspace_status", "workspace_id", "status"),
-        Index("ix_documents_workspace_sha", "workspace_id", "sha256"),
+        # At most one active document per content hash and workspace. Enforced by the
+        # database so concurrent uploads of the same file cannot both succeed.
+        Index(
+            "uq_documents_workspace_sha_active",
+            "workspace_id",
+            "sha256",
+            unique=True,
+            postgresql_where=text("status NOT IN ('deleted', 'failed')"),
+        ),
+        # Keyset pagination: WHERE workspace_id = ? AND (created_at, id) > (?, ?).
+        Index("ix_documents_workspace_created_id", "workspace_id", "created_at", "id"),
     )
 
     id: Mapped[str] = mapped_column(
