@@ -1,12 +1,14 @@
 from __future__ import annotations
 
+import base64
+import json
 import re
 import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal
+from typing import Any, Literal, NoReturn
 
 from rag_agent.auth import create_access_token, hash_password, verify_password
 from rag_agent.cache import TTLCache
@@ -20,6 +22,7 @@ from rag_agent.errors import (
     IngestionNotFoundError,
     MalformedLLMOutputError,
     RateLimitExceededError,
+    RequestValidationError,
     TokenLimitExceededError,
     WorkspaceNotFoundError,
 )
@@ -51,7 +54,7 @@ from rag_agent.schemas import (
     WorkspaceMembership,
     WorkspaceRecord,
 )
-from rag_agent.store import RAGStore
+from rag_agent.store import DocumentCursor, DuplicateDocumentConflict, RAGStore
 from rag_agent.tracing import get_tracer
 
 log = get_logger(__name__)
@@ -174,108 +177,120 @@ class RAGService:
     ) -> tuple[DocumentRecord, IngestionJobRecord]:
         self._require_workspace_role(user_id, workspace_id, MembershipRole.editor)
         parsed = parse_document_bytes(filename, content_type, data, settings=self.settings)
+        # Fast path: skip chunking and embedding for an obvious re-upload. The database's
+        # unique index is what actually guarantees no duplicates (see publish below).
         duplicate = self.store.find_active_document_by_sha(workspace_id, parsed.sha256)
         if duplicate:
-            job = self.store.create_ingestion_job(
-                IngestionJobRecord(
-                    workspace_id=workspace_id,
-                    requested_by_user_id=user_id,
-                    document_id=duplicate.id,
-                    operation="upload",
-                    status=IngestionStatus.duplicate,
-                    error_code="duplicate_ingestion",
-                    error_message="An active document with the same content already exists.",
-                    completed_at=self._now(),
-                )
-            )
-            raise DuplicateIngestionError(
-                "Duplicate ingestion request rejected.",
-                details={"document_id": duplicate.id, "job_id": job.id},
-            )
+            self._reject_duplicate(user_id, workspace_id, duplicate.id)
 
-        document = self.store.create_document(
-            DocumentRecord(
-                workspace_id=workspace_id,
-                created_by_user_id=user_id,
-                source_name=parsed.source_name,
-                media_type=parsed.media_type,
-                file_size=parsed.file_size,
-                sha256=parsed.sha256,
-                status=DocumentStatus.pending,
-                content_text=parsed.text,
-                metadata=parsed.metadata,
-            )
+        document = DocumentRecord(
+            workspace_id=workspace_id,
+            created_by_user_id=user_id,
+            source_name=parsed.source_name,
+            media_type=parsed.media_type,
+            file_size=parsed.file_size,
+            sha256=parsed.sha256,
+            status=DocumentStatus.ready,
+            content_text=parsed.text,
+            metadata=parsed.metadata,
         )
+        # Embedding can call a slow external API, so it runs before the transaction opens;
+        # the database only sees one short write of the finished document.
+        try:
+            chunks = self._build_chunks(document)
+        except Exception as exc:
+            code = getattr(exc, "code", "ingestion_failed")
+            self.store.record_failed_document(
+                document.model_copy(
+                    update={
+                        "status": DocumentStatus.failed,
+                        "error_code": code,
+                        "error_message": str(exc),
+                    }
+                ),
+                self._job(
+                    document,
+                    user_id,
+                    "upload",
+                    IngestionStatus.failed,
+                    error_code=code,
+                    error_message=str(exc),
+                ),
+            )
+            log.warning("ingestion.failed", document_id=document.id, error=str(exc))
+            raise
+
+        document = document.model_copy(
+            update={"metadata": {**document.metadata, "chunk_count": len(chunks)}}
+        )
+        try:
+            document, job = self.store.publish_document(
+                document,
+                chunks,
+                self._job(document, user_id, "upload", IngestionStatus.completed),
+                self.settings.embedding_model,
+            )
+        except DuplicateDocumentConflict as conflict:
+            # Lost a race with a concurrent upload of the same file.
+            self._reject_duplicate(user_id, workspace_id, conflict.existing_document_id)
+        self.retrieval_cache.invalidate_prefix(f"{workspace_id}:")
+        return document, job
+
+    def _reject_duplicate(self, user_id: str, workspace_id: str, existing_id: str) -> NoReturn:
         job = self.store.create_ingestion_job(
             IngestionJobRecord(
                 workspace_id=workspace_id,
                 requested_by_user_id=user_id,
-                document_id=document.id,
+                document_id=existing_id or None,
                 operation="upload",
-                status=IngestionStatus.pending,
+                status=IngestionStatus.duplicate,
+                error_code="duplicate_ingestion",
+                error_message="An active document with the same content already exists.",
+                completed_at=self._now(),
             )
         )
-        return self._index_document(document=document, job=job)
+        raise DuplicateIngestionError(
+            "Duplicate ingestion request rejected.",
+            details={"document_id": existing_id, "job_id": job.id},
+        )
 
-    def _index_document(
-        self, *, document: DocumentRecord, job: IngestionJobRecord
-    ) -> tuple[DocumentRecord, IngestionJobRecord]:
-        self.store.update_ingestion_job(
-            job.id, status=IngestionStatus.processing, attempt_count=job.attempt_count + 1
+    def _build_chunks(self, document: DocumentRecord) -> list[ChunkRecord]:
+        chunks = chunk_text(document.content_text, settings=self.settings)
+        embeddings = self.embeddings.embed_documents([chunk.content for chunk in chunks])
+        return [
+            ChunkRecord(
+                document_id=document.id,
+                workspace_id=document.workspace_id,
+                chunk_index=chunk.chunk_index,
+                content=chunk.content,
+                token_count=chunk.token_count,
+                embedding=embedding,
+                metadata=chunk.metadata,
+            )
+            for chunk, embedding in zip(chunks, embeddings, strict=True)
+        ]
+
+    def _job(
+        self,
+        document: DocumentRecord,
+        user_id: str,
+        operation: str,
+        status: IngestionStatus,
+        *,
+        error_code: str | None = None,
+        error_message: str | None = None,
+    ) -> IngestionJobRecord:
+        return IngestionJobRecord(
+            workspace_id=document.workspace_id,
+            requested_by_user_id=user_id,
+            document_id=document.id,
+            operation=operation,
+            status=status,
+            attempt_count=1,
+            error_code=error_code,
+            error_message=error_message,
+            completed_at=self._now(),
         )
-        self.store.update_document(document.id, status=DocumentStatus.processing)
-        try:
-            chunks = chunk_text(document.content_text, settings=self.settings)
-            embeddings = self.embeddings.embed_documents([chunk.content for chunk in chunks])
-            records = [
-                ChunkRecord(
-                    document_id=document.id,
-                    workspace_id=document.workspace_id,
-                    chunk_index=chunk.chunk_index,
-                    content=chunk.content,
-                    token_count=chunk.token_count,
-                    embedding=embedding,
-                    metadata=chunk.metadata,
-                )
-                for chunk, embedding in zip(chunks, embeddings, strict=True)
-            ]
-            self.store.replace_document_chunks(
-                document.id, document.workspace_id, records, self.settings.embedding_model
-            )
-            document = self.store.update_document(
-                document.id,
-                status=DocumentStatus.ready,
-                metadata={**document.metadata, "chunk_count": len(records)},
-                error_code=None,
-                error_message=None,
-            )
-            self.store.bump_workspace_index_version(document.workspace_id)
-            self.retrieval_cache.invalidate_prefix(f"{document.workspace_id}:")
-            job = self.store.update_ingestion_job(
-                job.id,
-                status=IngestionStatus.completed,
-                completed_at=self._now(),
-                error_code=None,
-                error_message=None,
-            )
-            return document, job
-        except Exception as exc:
-            self.store.delete_document_chunks(document.id)
-            self.store.update_document(
-                document.id,
-                status=DocumentStatus.failed,
-                error_code=getattr(exc, "code", "ingestion_failed"),
-                error_message=str(exc),
-            )
-            self.store.update_ingestion_job(
-                job.id,
-                status=IngestionStatus.failed,
-                completed_at=self._now(),
-                error_code=getattr(exc, "code", "ingestion_failed"),
-                error_message=str(exc),
-            )
-            log.warning("ingestion.failed", document_id=document.id, error=str(exc))
-            raise
 
     def reindex_document(
         self, *, user_id: str, workspace_id: str, document_id: str
@@ -284,16 +299,33 @@ class RAGService:
         document = self.store.get_document(document_id, workspace_id)
         if not document or document.status == DocumentStatus.deleted:
             raise DocumentNotFoundError(document_id)
-        job = self.store.create_ingestion_job(
-            IngestionJobRecord(
-                workspace_id=workspace_id,
-                requested_by_user_id=user_id,
-                document_id=document_id,
-                operation="reindex",
-                status=IngestionStatus.pending,
+        try:
+            chunks = self._build_chunks(document)
+        except Exception as exc:
+            # The previous chunks stay in place, so search keeps working on the old index.
+            self.store.create_ingestion_job(
+                self._job(
+                    document,
+                    user_id,
+                    "reindex",
+                    IngestionStatus.failed,
+                    error_code=getattr(exc, "code", "ingestion_failed"),
+                    error_message=str(exc),
+                )
             )
+            log.warning("reindex.failed", document_id=document.id, error=str(exc))
+            raise
+        # Raises DocumentNotFoundError if the document was deleted while we were embedding.
+        document, job = self.store.replace_document_index(
+            document_id,
+            workspace_id,
+            chunks,
+            self._job(document, user_id, "reindex", IngestionStatus.completed),
+            self.settings.embedding_model,
+            {**document.metadata, "chunk_count": len(chunks)},
         )
-        return self._index_document(document=document, job=job)
+        self.retrieval_cache.invalidate_prefix(f"{workspace_id}:")
+        return document, job
 
     def delete_document(
         self, *, user_id: str, workspace_id: str, document_id: str
@@ -302,20 +334,12 @@ class RAGService:
         document = self.store.get_document(document_id, workspace_id)
         if not document:
             raise DocumentNotFoundError(document_id)
-        self.store.delete_document_chunks(document_id)
-        document = self.store.update_document(document_id, status=DocumentStatus.deleted)
-        self.store.bump_workspace_index_version(workspace_id)
-        self.retrieval_cache.invalidate_prefix(f"{workspace_id}:")
-        job = self.store.create_ingestion_job(
-            IngestionJobRecord(
-                workspace_id=workspace_id,
-                requested_by_user_id=user_id,
-                document_id=document_id,
-                operation="delete",
-                status=IngestionStatus.completed,
-                completed_at=self._now(),
-            )
+        document, job = self.store.delete_document(
+            document_id,
+            workspace_id,
+            self._job(document, user_id, "delete", IngestionStatus.completed),
         )
+        self.retrieval_cache.invalidate_prefix(f"{workspace_id}:")
         return document, job
 
     def get_document(self, *, user_id: str, workspace_id: str, document_id: str) -> DocumentRecord:
@@ -325,9 +349,18 @@ class RAGService:
             raise DocumentNotFoundError(document_id)
         return document
 
-    def list_documents(self, *, user_id: str, workspace_id: str) -> list[DocumentRecord]:
+    def list_documents(
+        self, *, user_id: str, workspace_id: str, limit: int = 50, cursor: str | None = None
+    ) -> tuple[list[DocumentRecord], str | None]:
+        """One page of documents, oldest first, and the cursor for the next page (or None)."""
         self._require_workspace_role(user_id, workspace_id, MembershipRole.viewer)
-        return self.store.list_documents(workspace_id)
+        after = decode_document_cursor(cursor) if cursor else None
+        # Fetch one extra row to learn whether another page exists.
+        documents = self.store.list_documents(workspace_id, limit=limit + 1, after=after)
+        if len(documents) <= limit:
+            return documents, None
+        page = documents[:limit]
+        return page, encode_document_cursor(page[-1])
 
     def get_ingestion_job(
         self, *, user_id: str, workspace_id: str, job_id: str
@@ -504,3 +537,20 @@ def _redact_chunks(chunks: list[RetrievedChunk]) -> list[RetrievedChunk]:
         )
         for chunk in chunks
     ]
+
+
+def encode_document_cursor(document: DocumentRecord) -> str:
+    """Opaque page cursor holding the last document's (created_at, id) sort key."""
+    raw = json.dumps({"created_at": document.created_at.isoformat(), "id": document.id})
+    return base64.urlsafe_b64encode(raw.encode()).decode().rstrip("=")
+
+
+def decode_document_cursor(cursor: str) -> DocumentCursor:
+    try:
+        padded = cursor + "=" * (-len(cursor) % 4)
+        data = json.loads(base64.urlsafe_b64decode(padded.encode()))
+        return DocumentCursor(
+            created_at=datetime.fromisoformat(data["created_at"]), id=str(data["id"])
+        )
+    except (ValueError, KeyError, TypeError) as exc:
+        raise RequestValidationError("Invalid pagination cursor.") from exc

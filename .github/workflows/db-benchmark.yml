@@ -1,0 +1,71 @@
+name: Database benchmark
+
+# Seeds a multi-tenant corpus (175,000 chunks across 323 workspaces) into the same
+# pgvector image the app uses, then measures the store's hot queries with the base
+# branch's code ("before") and this branch's code ("after") on the same database.
+on:
+  workflow_dispatch:
+    inputs:
+      base_ref:
+        description: Branch or commit to compare against
+        default: feature/react-workspace-ui
+      scale:
+        description: Corpus size multiplier (1.0 = 175,000 chunks)
+        default: "1.0"
+  push:
+    branches: ["perf/**"]
+    paths:
+      - "src/rag_agent/postgres_store.py"
+      - "scripts/db_benchmark.py"
+      - "alembic/**"
+      - ".github/workflows/db-benchmark.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: rag_agent
+          POSTGRES_PASSWORD: rag_agent
+          POSTGRES_DB: rag_agent_bench
+        ports: ["5432:5432"]
+        # Parallel HNSW builds use shared memory; Docker's default /dev/shm is 64 MB.
+        options: >-
+          --shm-size 2g
+          --health-cmd "pg_isready -U rag_agent -d rag_agent_bench"
+          --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      DB: postgresql+psycopg://rag_agent:rag_agent@localhost:5432/rag_agent_bench
+      APP_DATABASE_URL: postgresql+psycopg://rag_agent:rag_agent@localhost:5432/rag_agent_bench
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.base_ref || 'feature/react-workspace-ui' }}
+          path: baseline
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - run: pip install -e '.[dev]'
+      - run: alembic upgrade head
+      - name: Seed corpus
+        run: python scripts/db_benchmark.py seed --database-url "$DB" --scale "${{ inputs.scale || '1.0' }}"
+      - name: Measure base branch
+        run: python scripts/db_benchmark.py measure --database-url "$DB" --label before --code-path baseline/src --out before.json
+      - name: Measure this branch
+        run: python scripts/db_benchmark.py measure --database-url "$DB" --label after --out after.json
+      - name: Report
+        run: python scripts/db_benchmark.py report before.json after.json | tee report.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: db-benchmark
+          path: |
+            before.json
+            after.json
+            report.md

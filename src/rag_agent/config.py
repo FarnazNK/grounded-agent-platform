@@ -47,6 +47,8 @@ class Settings(BaseSettings):
     min_fused_score: float = Field(default=0.15, ge=0.0, le=1.0)
     # Refuse before generation when IDF-weighted query-term coverage is below this (0 = off).
     min_evidence_coverage: float = Field(default=0.2, ge=0.0, le=1.0)
+    # Workspaces up to this many chunks get exact vector search; larger ones use HNSW.
+    exact_vector_search_max_chunks: int = Field(default=20_000, ge=0)
     chunk_size_words: int = Field(default=180, ge=20, le=2000)
     chunk_overlap_words: int = Field(default=30, ge=0, le=1000)
 

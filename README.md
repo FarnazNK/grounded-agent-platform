@@ -97,6 +97,7 @@ CI runs the retrieval, groundedness, refusal, agent-context and latency gates on
 - **One Postgres for data, vectors and search:** one system to run and secure ([ADR 0002](docs/adr/0002-pgvector.md)).
 - **Policy in code, not prompts:** the reviewer agent can't write files even if its prompt is injected.
 - **Outputs are validated:** an answer must cite the documents it was given.
+- **Consistency enforced by Postgres:** uploads publish in one transaction, a partial unique index rejects concurrent duplicate uploads, and reindex/delete lock the document row. Small tenants get exact vector search, large ones iterative HNSW ([details and benchmark](docs/database.md)).
 - **Refuse on missing evidence:** if the retrieved text doesn't cover the question's key terms, the API declines before calling the model, so it can't guess and the call costs nothing.
 
 ## Limitations
@@ -107,4 +108,4 @@ CI runs the retrieval, groundedness, refusal, agent-context and latency gates on
 
 ## Docs
 
-[Architecture](docs/architecture.md) · [Developer agent](docs/developer-agent.md) · [Observability](docs/observability.md) · [Deployment](docs/deployment.md) · [Limitations](docs/limitations.md) · [Optional demos](docs/optional-demos.md)
+[Architecture](docs/architecture.md) · [Database](docs/database.md) · [Developer agent](docs/developer-agent.md) · [Observability](docs/observability.md) · [Deployment](docs/deployment.md) · [Limitations](docs/limitations.md) · [Optional demos](docs/optional-demos.md)
