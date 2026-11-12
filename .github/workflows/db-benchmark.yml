@@ -1,6 +1,6 @@
 name: Database benchmark
 
-# Seeds a multi-tenant corpus (170,000 chunks across 321 workspaces) into the same
+# Seeds a multi-tenant corpus (175,000 chunks across 323 workspaces) into the same
 # pgvector image the app uses, then measures the store's hot queries with the base
 # branch's code ("before") and this branch's code ("after") on the same database.
 on:
@@ -10,7 +10,7 @@ on:
         description: Branch or commit to compare against
         default: feature/react-workspace-ui
       scale:
-        description: Corpus size multiplier (1.0 = 170,000 chunks)
+        description: Corpus size multiplier (1.0 = 175,000 chunks)
         default: "1.0"
   push:
     branches: ["perf/**"]

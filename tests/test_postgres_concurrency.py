@@ -267,3 +267,71 @@ def test_documents_created_in_the_same_instant_are_ordered_by_id(pg):
     )
     assert [d.id for d in first + rest] == [d.id for d in everything]
     assert len({d.created_at for d in everything}) == 1
+
+
+def test_workspace_chunk_count_tracks_every_write(pg):
+    service, count = pg["service"], pg["count"]
+
+    def stored_vs_actual():
+        return (
+            count("SELECT chunk_count FROM workspaces"),
+            count("SELECT count(*) FROM document_chunks"),
+        )
+
+    long_doc = (
+        " ".join(f"Clause {i} covers leave, pay and equipment." for i in range(120))
+    ).encode()
+    first, _ = service.ingest_document(
+        user_id=pg["user_id"],
+        workspace_id=pg["workspace_id"],
+        filename="long.md",
+        content_type="text/markdown",
+        data=long_doc,
+    )
+    assert stored_vs_actual()[0] == stored_vs_actual()[1] > 1
+    upload(service, pg["user_id"], pg["workspace_id"])
+    service.reindex_document(
+        user_id=pg["user_id"], workspace_id=pg["workspace_id"], document_id=first.id
+    )
+    stored, actual = stored_vs_actual()
+    assert stored == actual
+    service.delete_document(
+        user_id=pg["user_id"], workspace_id=pg["workspace_id"], document_id=first.id
+    )
+    stored, actual = stored_vs_actual()
+    assert stored == actual
+    assert actual >= 1
+
+
+def test_exact_and_hnsw_strategies_return_the_same_neighbours(pg):
+    from rag_agent.db import get_session_factory
+    from rag_agent.postgres_store import _EXACT_DENSE_SQL, PostgresRAGStore
+
+    service = pg["service"]
+    for index in range(5):
+        service.ingest_document(
+            user_id=pg["user_id"],
+            workspace_id=pg["workspace_id"],
+            filename=f"policy{index}.md",
+            content_type="text/markdown",
+            data=f"Policy {index}: rules about topic {index} and related matters.".encode(),
+        )
+    query = service.embeddings.embed_query("rules about topic 3")
+    exact = PostgresRAGStore(get_session_factory(), exact_search_max_chunks=10_000)
+    hnsw = PostgresRAGStore(get_session_factory(), exact_search_max_chunks=0)
+
+    exact_ids = [c.chunk_id for c in exact.dense_search(pg["workspace_id"], query, 3)[0]]
+    hnsw_ids = [c.chunk_id for c in hnsw.dense_search(pg["workspace_id"], query, 3)[0]]
+    assert exact_ids == hnsw_ids and len(exact_ids) == 3
+
+    # The exact query must never use the HNSW index, whatever the planner prefers.
+    literal = "[" + ",".join(f"{value:.8f}" for value in query) + "]"
+    with pg["engine"].begin() as conn:
+        conn.execute(text("SET LOCAL enable_seqscan = off"))
+        plan = "\n".join(
+            conn.execute(
+                text(f"EXPLAIN {_EXACT_DENSE_SQL.text}"),
+                {"workspace_id": pg["workspace_id"], "embedding": literal, "limit": 3},
+            ).scalars()
+        )
+    assert "ix_document_chunks_embedding" not in plan

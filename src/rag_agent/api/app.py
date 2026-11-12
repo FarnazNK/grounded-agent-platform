@@ -74,7 +74,10 @@ async def _lifespan(app: FastAPI):
 
         app.state.settings = get_settings()
         app.state.langsmith_enabled = maybe_enable_langsmith()
-        app.state.store = PostgresRAGStore(get_session_factory())
+        app.state.store = PostgresRAGStore(
+            get_session_factory(),
+            exact_search_max_chunks=app.state.settings.exact_vector_search_max_chunks,
+        )
         app.state.service = RAGService(app.state.store, settings=app.state.settings)
     yield
     get_tracer().flush()

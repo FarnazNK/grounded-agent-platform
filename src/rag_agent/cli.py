@@ -27,7 +27,12 @@ def bootstrap_demo(
     workspace_name: str = typer.Option("Default Workspace"),
 ) -> None:
     init_engine()
-    service = RAGService(PostgresRAGStore(get_session_factory()))
+    service = RAGService(
+        PostgresRAGStore(
+            get_session_factory(),
+            exact_search_max_chunks=get_settings().exact_vector_search_max_chunks,
+        )
+    )
     membership = service.bootstrap_admin(
         email=email,
         password=password,

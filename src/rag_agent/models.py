@@ -61,6 +61,9 @@ class Workspace(Base, TimestampMixin):
     index_version: Mapped[int] = mapped_column(
         Integer, nullable=False, default=1, server_default="1"
     )
+    # Chunks currently indexed in this workspace, maintained in the same transactions that
+    # add or remove chunks. Used to pick the vector-search strategy without counting rows.
+    chunk_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
 
 
 class User(Base, TimestampMixin):

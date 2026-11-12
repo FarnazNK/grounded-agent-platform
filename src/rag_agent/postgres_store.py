@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from datetime import UTC, datetime
 
-from sqlalchemy import delete, func, literal, select, text, tuple_, update
+from sqlalchemy import TextClause, delete, func, literal, select, text, tuple_, update
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -51,9 +51,40 @@ def _constraint_name(exc: IntegrityError) -> str | None:
     return getattr(diag, "constraint_name", None)
 
 
+def _dense_sql(order_by: str) -> TextClause:
+    return text(
+        f"""
+        WITH nearest AS MATERIALIZED (
+            SELECT c.id, c.document_id, c.content, c.chunk_metadata,
+                   c.embedding <=> CAST(:embedding AS vector) AS distance
+            FROM document_chunks c
+            WHERE c.workspace_id = :workspace_id
+            ORDER BY {order_by}
+            LIMIT :limit
+        )
+        SELECT n.id, n.document_id, d.source_name, n.content, n.chunk_metadata,
+               1 - n.distance AS score
+        FROM nearest n
+        JOIN documents d ON d.id = n.document_id
+        WHERE d.status = 'ready'
+        ORDER BY n.distance
+        """
+    )
+
+
+# Ordering by the bare distance operator lets the planner use the HNSW index.
+_ANN_DENSE_SQL = _dense_sql("c.embedding <=> CAST(:embedding AS vector)")
+# "+ 0" makes the sort key an expression the HNSW index cannot serve, so the planner reads
+# the workspace's rows through ix_document_chunks_workspace_document and sorts them: exact.
+_EXACT_DENSE_SQL = _dense_sql("(c.embedding <=> CAST(:embedding AS vector)) + 0")
+
+
 class PostgresRAGStore:
-    def __init__(self, session_factory: sessionmaker[Session]) -> None:
+    def __init__(
+        self, session_factory: sessionmaker[Session], *, exact_search_max_chunks: int = 20_000
+    ) -> None:
         self._session_factory = session_factory
+        self._exact_search_max_chunks = exact_search_max_chunks
         self._pgvector_version: tuple[int, ...] | None = None
 
     def _session(self) -> Session:
@@ -314,7 +345,7 @@ class PostgresRAGStore:
                     session.add_all(self._chunk_model(chunk, embedding_model) for chunk in chunks)
                     job_row = self._job_model(job)
                     session.add(job_row)
-                    self._bump_index_version(session, document.workspace_id)
+                    self._bump_index_version(session, document.workspace_id, len(chunks))
                     session.flush()
                     session.refresh(row)
                     return self._document_record(row), self._job_record(job_row)
@@ -354,9 +385,9 @@ class PostgresRAGStore:
                 row = self._lock_document(session, document_id, workspace_id)
                 if row is None or row.status == DocumentStatus.deleted.value:
                     raise DocumentNotFoundError(document_id)
-                session.execute(
+                removed = session.execute(
                     delete(DocumentChunk).where(DocumentChunk.document_id == document_id)
-                )
+                ).rowcount
                 session.add_all(self._chunk_model(chunk, embedding_model) for chunk in chunks)
                 row.status = DocumentStatus.ready.value
                 row.document_metadata = metadata
@@ -365,7 +396,7 @@ class PostgresRAGStore:
                 row.updated_at = datetime.now(UTC)
                 job_row = self._job_model(job)
                 session.add(job_row)
-                self._bump_index_version(session, workspace_id)
+                self._bump_index_version(session, workspace_id, len(chunks) - removed)
                 session.flush()
                 return self._document_record(row), self._job_record(job_row)
 
@@ -379,14 +410,14 @@ class PostgresRAGStore:
                 row = self._lock_document(session, document_id, workspace_id)
                 if row is None:
                     raise DocumentNotFoundError(document_id)
-                session.execute(
+                removed = session.execute(
                     delete(DocumentChunk).where(DocumentChunk.document_id == document_id)
-                )
+                ).rowcount
                 row.status = DocumentStatus.deleted.value
                 row.updated_at = datetime.now(UTC)
                 job_row = self._job_model(job)
                 session.add(job_row)
-                self._bump_index_version(session, workspace_id)
+                self._bump_index_version(session, workspace_id, -removed)
                 session.flush()
                 return self._document_record(row), self._job_record(job_row)
 
@@ -402,11 +433,17 @@ class PostgresRAGStore:
         )
 
     @staticmethod
-    def _bump_index_version(session: Session, workspace_id: str) -> None:
+    def _bump_index_version(session: Session, workspace_id: str, chunk_delta: int) -> None:
+        """New index version (invalidates caches) and adjusted chunk count, in the caller's
+        transaction, so the count can never drift from the chunks actually stored."""
         session.execute(
             update(Workspace)
             .where(Workspace.id == workspace_id)
-            .values(index_version=Workspace.index_version + 1, updated_at=datetime.now(UTC))
+            .values(
+                index_version=Workspace.index_version + 1,
+                chunk_count=Workspace.chunk_count + chunk_delta,
+                updated_at=datetime.now(UTC),
+            )
         )
 
     @staticmethod
@@ -458,43 +495,32 @@ class PostgresRAGStore:
     def dense_search(
         self, workspace_id: str, query_embedding: list[float], limit: int
     ) -> tuple[list[RetrievedChunk], float]:
-        """Nearest chunks within one workspace.
+        """Nearest chunks within one workspace, by one of two strategies.
 
-        The HNSW index spans every workspace, and the tenant filter applies to what the index
-        returns. Without iterative scans, pgvector stops after ``hnsw.ef_search`` candidates
-        (40 by default), so a workspace holding a small share of a large table can get fewer
-        results than requested, often none. On pgvector 0.8+ ``hnsw.iterative_scan`` keeps
-        scanning until ``limit`` rows pass the filter. ``relaxed_order`` may return them
-        slightly out of order, so the outer query re-sorts by distance.
+        The HNSW index spans every workspace and the tenant filter applies to what it returns.
+        By default pgvector stops after ``hnsw.ef_search`` candidates (40), so a workspace
+        holding a small share of the table can get fewer results than requested, or none.
+
+        * Workspaces up to ``exact_search_max_chunks`` get an exact search over their own
+          rows (workspace index, then sort): complete, and cheap at that size.
+        * Larger workspaces use HNSW with ``hnsw.iterative_scan`` (pgvector 0.8+), which
+          keeps scanning until ``limit`` rows pass the filter. ``relaxed_order`` may return
+          them slightly out of order, so the outer query re-sorts by distance.
         """
         vector_literal = "[" + ",".join(f"{value:.8f}" for value in query_embedding) + "]"
-        sql = text(
-            """
-            WITH nearest AS MATERIALIZED (
-                SELECT c.id, c.document_id, c.content, c.chunk_metadata,
-                       c.embedding <=> CAST(:embedding AS vector) AS distance
-                FROM document_chunks c
-                WHERE c.workspace_id = :workspace_id
-                ORDER BY c.embedding <=> CAST(:embedding AS vector)
-                LIMIT :limit
-            )
-            SELECT n.id, n.document_id, d.source_name, n.content, n.chunk_metadata,
-                   1 - n.distance AS score
-            FROM nearest n
-            JOIN documents d ON d.id = n.document_id
-            WHERE d.status = 'ready'
-            ORDER BY n.distance
-            """
-        )
 
         def inner():
             start = time.perf_counter()
             with self._session() as session, session.begin():
-                if self._supports_iterative_scan(session):
+                chunk_count = session.scalar(
+                    select(Workspace.chunk_count).where(Workspace.id == workspace_id)
+                )
+                exact = (chunk_count or 0) <= self._exact_search_max_chunks
+                if not exact and self._supports_iterative_scan(session):
                     session.execute(text("SET LOCAL hnsw.iterative_scan = relaxed_order"))
                 rows = (
                     session.execute(
-                        sql,
+                        _EXACT_DENSE_SQL if exact else _ANN_DENSE_SQL,
                         {"workspace_id": workspace_id, "embedding": vector_literal, "limit": limit},
                     )
                     .mappings()
@@ -618,7 +644,6 @@ class PostgresRAGStore:
             FROM unnest(CAST(:stems AS text[])) AS t(stem)
             """
         )
-        total_sql = text("SELECT count(*) FROM document_chunks WHERE workspace_id = :workspace_id")
 
         def inner():
             if not stems:
@@ -626,7 +651,12 @@ class PostgresRAGStore:
             params = {"workspace_id": workspace_id, "stems": list(stems), "extra": STEM_MAX_EXTRA}
             with self._session() as session:
                 rows = session.execute(sql, params).all()
-                total = int(session.scalar(total_sql, {"workspace_id": workspace_id}) or 0)
+                total = int(
+                    session.scalar(
+                        select(Workspace.chunk_count).where(Workspace.id == workspace_id)
+                    )
+                    or 0
+                )
             return {row.stem: int(row.df) for row in rows}, total
 
         return self._run(inner)

@@ -355,8 +355,9 @@ class InMemoryRAGStore:
 
     def _bump_index_version(self, workspace_id: str) -> None:
         workspace = self.workspaces[workspace_id]
+        chunk_count = sum(1 for chunk in self.chunks.values() if chunk.workspace_id == workspace_id)
         self.workspaces[workspace_id] = workspace.model_copy(
-            update={"index_version": workspace.index_version + 1}
+            update={"index_version": workspace.index_version + 1, "chunk_count": chunk_count}
         )
 
     def term_document_frequencies(
