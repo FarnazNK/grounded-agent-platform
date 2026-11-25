@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -88,3 +88,20 @@ class ErrorResponse(BaseModel):
     message: str
     retryable: bool
     details: dict[str, Any] = Field(default_factory=dict)
+
+
+class ExtractionRequest(BaseModel):
+    workspace_id: str
+    schema_name: Literal["policy_facts"] = Field("policy_facts", alias="schema")
+
+    model_config = {"populate_by_name": True}
+
+
+class ExtractionResponse(BaseModel):
+    document_id: str
+    schema_name: str = Field(serialization_alias="schema")
+    status: Literal["valid"]
+    data: dict[str, Any]
+    provider: str
+    attempts: int
+    latency_ms: float

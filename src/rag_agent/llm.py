@@ -146,6 +146,19 @@ class LangChainLLMProvider:
         )
 
 
+def build_structured_llm(settings: Settings, provider: LLMProvider) -> Any:
+    """The model used for structured extraction: the configured chat model, or the
+    rule-based extractor in deterministic mode."""
+    from rag_agent.extraction import DeterministicExtractor, LangChainStructuredLLM
+
+    if isinstance(provider, LangChainLLMProvider):
+        return LangChainStructuredLLM(
+            lambda prompt: _retry_provider_call(lambda: provider._invoke(prompt)),
+            name=settings.llm_model,
+        )
+    return DeterministicExtractor()
+
+
 def build_llm_provider(settings: Settings | None = None) -> LLMProvider:
     settings = settings or get_settings()
     if settings.llm_provider == "deterministic":
