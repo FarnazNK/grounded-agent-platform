@@ -20,6 +20,7 @@ class ErrorCode(StrEnum):
     DATABASE_UNAVAILABLE = "database_unavailable"
     VALIDATION_FAILED = "validation_failed"
     RATE_LIMIT_EXCEEDED = "rate_limit_exceeded"
+    EXTRACTION_REJECTED = "extraction_rejected"
 
 
 class AppError(Exception):
@@ -138,3 +139,15 @@ class RateLimitExceededError(AppError):
 class RequestValidationError(AppError):
     def __init__(self, message: str, *, details: dict[str, Any] | None = None) -> None:
         super().__init__(ErrorCode.VALIDATION_FAILED, message, status_code=422, details=details)
+
+
+class ExtractionRejectedError(AppError):
+    """The model's structured output failed validation twice; nothing was saved."""
+
+    def __init__(self, errors: list[str], attempts: int) -> None:
+        super().__init__(
+            ErrorCode.EXTRACTION_REJECTED,
+            "The extracted fields failed validation, so nothing was saved.",
+            status_code=422,
+            details={"errors": errors[:20], "attempts": attempts},
+        )

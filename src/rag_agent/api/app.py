@@ -33,6 +33,8 @@ from rag_agent.api.schemas import (
     DocumentsResponse,
     DocumentView,
     ErrorResponse,
+    ExtractionRequest,
+    ExtractionResponse,
     IngestionJobResponse,
     LoginRequest,
     MeResponse,
@@ -289,6 +291,37 @@ def create_app(service: RAGService | None = None) -> FastAPI:
         )
         INGESTION_JOBS.labels(operation="delete", status=job.status.value).inc()
         return DocumentResponse(document=DocumentView.model_validate(document), job=job)
+
+    @app.post(
+        "/v1/documents/{document_id}/extract",
+        response_model=ExtractionResponse,
+        response_model_by_alias=True,
+        responses={422: {"model": ErrorResponse}},
+    )
+    def extract_document(
+        document_id: str,
+        req: ExtractionRequest,
+        user=Depends(current_user),
+        svc: RAGService = Depends(get_service),
+    ):
+        """Extract typed fields with the LLM. Saved to the document only if every
+        field passes schema and grounding validation; otherwise 422 with the errors."""
+        outcome, _ = svc.extract_document(
+            user_id=user.id,
+            workspace_id=req.workspace_id,
+            document_id=document_id,
+            schema=req.schema_name,
+        )
+        assert outcome.data is not None
+        return ExtractionResponse(
+            document_id=document_id,
+            schema_name=outcome.schema,
+            status="valid",
+            data=outcome.data,
+            provider=outcome.provider,
+            attempts=outcome.attempts,
+            latency_ms=round(outcome.latency_ms, 2),
+        )
 
     @app.get("/v1/ingestions/{job_id}", response_model=IngestionJobResponse)
     def get_ingestion_job(

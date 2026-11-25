@@ -17,13 +17,16 @@ from rag_agent.errors import (
     AuthorizationFailedError,
     DocumentNotFoundError,
     DuplicateIngestionError,
+    ExtractionRejectedError,
     IngestionNotFoundError,
     MalformedLLMOutputError,
     RateLimitExceededError,
+    RequestValidationError,
     TokenLimitExceededError,
     WorkspaceNotFoundError,
 )
 from rag_agent.evidence import REFUSAL_ANSWER, assess_evidence, topic_terms
+from rag_agent.extraction import ExtractionOutcome, StructuredLLM, extract
 from rag_agent.guardrails import (
     DataExfiltrationDetector,
     PIIDetector,
@@ -33,7 +36,7 @@ from rag_agent.guardrails import (
 )
 from rag_agent.guardrails.base import GuardrailAction, GuardrailViolation
 from rag_agent.guardrails.output_filters import SourceCitationChecker
-from rag_agent.llm import LLMProvider, build_llm_provider
+from rag_agent.llm import LLMProvider, build_llm_provider, build_structured_llm
 from rag_agent.observability import get_logger
 from rag_agent.parser import chunk_text, parse_document_bytes
 from rag_agent.retrieval import HybridRetriever
@@ -89,6 +92,7 @@ class RAGService:
         settings: Settings | None = None,
         embedding_service: EmbeddingService | None = None,
         llm_provider: LLMProvider | None = None,
+        structured_llm: StructuredLLM | None = None,
         retrieval_cache: TTLCache[str, QueryResult] | None = None,
         rate_limiter: SlidingWindowRateLimiter | None = None,
         now: Callable[[], datetime] | None = None,
@@ -97,6 +101,7 @@ class RAGService:
         self.store = store
         self.embeddings = embedding_service or build_embedding_service(self.settings)
         self.llm = llm_provider or build_llm_provider(self.settings)
+        self.structured_llm = structured_llm or build_structured_llm(self.settings, self.llm)
         self.retriever = HybridRetriever(store, self.settings)
         self.retrieval_cache = retrieval_cache or TTLCache[str, QueryResult](
             self.settings.retrieval_cache_ttl_seconds
@@ -324,6 +329,45 @@ class RAGService:
         if not document:
             raise DocumentNotFoundError(document_id)
         return document
+
+    def extract_document(
+        self, *, user_id: str, workspace_id: str, document_id: str, schema: str
+    ) -> tuple[ExtractionOutcome, DocumentRecord]:
+        """Extract structured fields from a document and save them only if they pass
+        schema and grounding validation. Raises ExtractionRejectedError otherwise."""
+        self._require_workspace_role(user_id, workspace_id, MembershipRole.editor)
+        document = self.store.get_document(document_id, workspace_id)
+        if not document:
+            raise DocumentNotFoundError(document_id)
+        if not document.content_text.strip():
+            raise RequestValidationError("This document has no text to extract from.")
+        with get_tracer().observe(
+            "extraction", kind="chain", metadata={"schema": schema, "document_id": document_id}
+        ) as span:
+            outcome = extract(document.content_text, self.structured_llm, schema)
+            span.update(
+                output={"status": outcome.status, "attempts": outcome.attempts},
+            )
+        log.info(
+            "extraction.finished",
+            document_id=document_id,
+            schema=schema,
+            status=outcome.status,
+            attempts=outcome.attempts,
+        )
+        if outcome.status != "valid":
+            raise ExtractionRejectedError(outcome.errors, outcome.attempts)
+        extractions = dict(document.metadata.get("extractions", {}))
+        extractions[schema] = {
+            "data": outcome.data,
+            "provider": outcome.provider,
+            "attempts": outcome.attempts,
+            "validated_at": self._now().isoformat(),
+        }
+        saved = self.store.update_document(
+            document.id, metadata={**document.metadata, "extractions": extractions}
+        )
+        return outcome, saved
 
     def list_documents(self, *, user_id: str, workspace_id: str) -> list[DocumentRecord]:
         self._require_workspace_role(user_id, workspace_id, MembershipRole.viewer)

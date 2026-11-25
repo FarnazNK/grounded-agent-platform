@@ -4,7 +4,7 @@
 [![Security](https://github.com/FarnazNK/grounded-agent-platform/actions/workflows/security.yml/badge.svg)](https://github.com/FarnazNK/grounded-agent-platform/actions/workflows/security.yml)
 [![Frontend build](https://github.com/FarnazNK/grounded-agent-platform/actions/workflows/frontend.yml/badge.svg)](https://github.com/FarnazNK/grounded-agent-platform/actions/workflows/frontend.yml)
 
-A multi-tenant RAG API and a policy-controlled coding agent. The model proposes; code outside the model decides what it may see, call and claim.
+A multi-tenant RAG API with validated structured extraction, and a policy-controlled coding agent. The model proposes; code outside the model decides what it may see, call, claim and save.
 
 [Web demo](https://grounded-agent-web.vercel.app) · [API docs](https://grounded-agent-api.vercel.app/docs)
 
@@ -72,11 +72,34 @@ From the [sample PTO policy](data/sample_corpus_extended/pto_policy.md), an **il
 
 This is the expected citation format. Try the [web demo](https://grounded-agent-web.vercel.app) for interactive examples.
 
+## Structured extraction
+
+`POST /v1/documents/{id}/extract` turns a policy document into typed fields with the LLM, and code decides whether they're saved:
+
+1. **Parse:** the reply must be a single JSON object.
+2. **Schema:** Pydantic checks types, enums (`days`, `weeks`, `percent`, `usd`, ...), ranges and list sizes, and rejects unknown fields.
+3. **Grounding:** every field carries a quote that must appear verbatim in the document; each value must appear in its own quote, and each number exactly as written there.
+
+If a check fails, the model gets one retry with the exact errors. If it fails again the API returns `422 extraction_rejected` with the errors, and nothing is saved. Valid results are stored on the document with the provider, attempt count and timestamp. The endpoint requires the editor role in the document's workspace.
+
+```json
+{
+  "policy_name": {"value": "Paid Time Off Policy", "quote": "# Paid Time Off Policy"},
+  "numeric_limits": [
+    {"label": "Carryover", "value": 5, "unit": "days",
+     "quote": "Employees may carry over up to 5 unused PTO days into the next calendar year."}
+  ],
+  "approval_required": {"value": true, "quote": "Manager approval is required."}
+}
+```
+
+With a model configured, the configured chat model does the extraction. In deterministic mode a rule-based extractor produces the JSON, and it goes through the same validator. → [`extraction.py`](src/rag_agent/extraction.py), [tests](tests/test_extraction.py)
+
 ## Security and verification
 
 - **Tenant boundaries:** JWT authentication, workspace-role checks and workspace-scoped retrieval.
 - **Agent permissions:** read-only planner/reviewer roles, explicit write opt-in and constrained repository tools; **not an OS-level sandbox**.
-- **Output checks:** PII redaction and citation validation; citations do not prove claim-level factual support.
+- **Output checks:** PII redaction and citation validation; citations do not prove claim-level factual support. Extracted fields are schema-validated and quote-checked before they're saved.
 - **CI:** unit and PostgreSQL integration tests, lint/type checks, retrieval and adversarial evaluations, latency benchmark, dependency scanning and Docker build.
 
 ## Results
@@ -88,6 +111,8 @@ This is the expected citation format. Try the [web demo](https://grounded-agent-
 | Refusals on a held-out set written before tuning | **6 of 9** (was 0 of 9) |
 | Answerable questions wrongly refused | **0 of 26** |
 | Query latency, in-process | p95 **5.9 ms** |
+| Structured extraction, 63 sample documents (rule-based extractor) | **63 of 63** valid on the first attempt |
+| Malformed or ungrounded extraction outputs (bad JSON, wrong types, unknown fields, invented quotes, wrong numbers) | **11 of 11** rejected |
 
 CI runs the retrieval, groundedness, refusal, agent-context and latency gates on every pull request. The branch is not protected, so a failing run flags a change rather than blocking the merge. `make eval-full` prints the extended report; it is informational, not a gate.
 
@@ -97,6 +122,7 @@ CI runs the retrieval, groundedness, refusal, agent-context and latency gates on
 - **One Postgres for data, vectors and search:** one system to run and secure ([ADR 0002](docs/adr/0002-pgvector.md)).
 - **Policy in code, not prompts:** the reviewer agent can't write files even if its prompt is injected.
 - **Outputs are validated:** an answer must cite the documents it was given.
+- **Validate before saving:** extracted fields must match a strict schema and quote the document, so a model can't save a value the document doesn't state.
 - **Refuse on missing evidence:** if the retrieved text doesn't cover the question's key terms, the API declines before calling the model, so it can't guess and the call costs nothing.
 
 ## Limitations
@@ -104,6 +130,7 @@ CI runs the retrieval, groundedness, refusal, agent-context and latency gates on
 - Questions near the corpus's topics but not covered by it (a sabbatical policy, military leave, the CEO's name) still get answered from the closest document. The evidence gate is lexical; catching these needs semantic embeddings or a model that reports missing context.
 - Prompt-injection screening is pattern-based. It catches direct requests for the system prompt, but not injections phrased in novel ways or hidden in documents.
 - The agent's tool policy is not an OS sandbox.
+- Extraction has one schema (`policy_facts`). The rule-based extractor finds numbers with explicit units and may miss limits phrased differently; a configured model covers those, and its output is held to the same checks.
 
 ## Docs
 
