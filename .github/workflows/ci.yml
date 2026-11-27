@@ -5,6 +5,10 @@ on:
     branches: [main, feature/react-workspace-ui]
   pull_request:
 
+# Least privilege: this workflow only reads the repository.
+permissions:
+  contents: read
+
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
@@ -78,5 +82,7 @@ jobs:
           if-no-files-found: error
       - name: Dependency scan
         run: pip-audit
+      - name: Static security analysis (Bandit, medium+ severity)
+        run: bandit -q -r src -ll
       - name: Docker build
         run: docker build -t rag-agent:ci .

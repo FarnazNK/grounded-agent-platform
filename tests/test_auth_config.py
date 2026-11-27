@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import secrets
+
 import pytest
 from pydantic import ValidationError
 
@@ -30,7 +32,7 @@ def test_production_disables_bootstrap() -> None:
 def test_production_configuration_can_be_valid() -> None:
     settings = Settings(
         app_env="production",
-        jwt_secret="x" * 32,
+        jwt_secret=secrets.token_urlsafe(48),
         enable_bootstrap_admin=False,
     )
     assert settings.app_env == "production"

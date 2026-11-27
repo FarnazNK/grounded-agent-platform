@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import re
-import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -9,7 +8,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from rag_agent.auth import create_access_token, hash_password, verify_password
-from rag_agent.cache import TTLCache
+from rag_agent.cache import RedisTTLCache, TTLCache
 from rag_agent.config import Settings, get_settings
 from rag_agent.embeddings import EmbeddingService, build_embedding_service
 from rag_agent.errors import (
@@ -19,7 +18,6 @@ from rag_agent.errors import (
     DuplicateIngestionError,
     IngestionNotFoundError,
     MalformedLLMOutputError,
-    RateLimitExceededError,
     TokenLimitExceededError,
     WorkspaceNotFoundError,
 )
@@ -36,6 +34,7 @@ from rag_agent.guardrails.output_filters import SourceCitationChecker
 from rag_agent.llm import LLMProvider, build_llm_provider
 from rag_agent.observability import get_logger
 from rag_agent.parser import chunk_text, parse_document_bytes
+from rag_agent.ratelimit import InMemoryRateLimiter, RateLimiter
 from rag_agent.retrieval import HybridRetriever
 from rag_agent.schemas import (
     ChunkRecord,
@@ -64,21 +63,8 @@ class AuthResult:
     user: UserRecord
 
 
-class SlidingWindowRateLimiter:
-    def __init__(self, limit_per_minute: int) -> None:
-        self._limit = limit_per_minute
-        self._events: dict[str, list[float]] = {}
-        self._lock = threading.Lock()
-
-    def check(self, key: str) -> None:
-        now = time.time()
-        cutoff = now - 60
-        with self._lock:
-            events = [event for event in self._events.get(key, []) if event >= cutoff]
-            if len(events) >= self._limit:
-                raise RateLimitExceededError()
-            events.append(now)
-            self._events[key] = events
+# Backwards-compatible name; the implementation now bounds memory and supports Redis.
+SlidingWindowRateLimiter = InMemoryRateLimiter
 
 
 class RAGService:
@@ -89,8 +75,8 @@ class RAGService:
         settings: Settings | None = None,
         embedding_service: EmbeddingService | None = None,
         llm_provider: LLMProvider | None = None,
-        retrieval_cache: TTLCache[str, QueryResult] | None = None,
-        rate_limiter: SlidingWindowRateLimiter | None = None,
+        retrieval_cache: TTLCache[str, QueryResult] | RedisTTLCache[QueryResult] | None = None,
+        rate_limiter: RateLimiter | None = None,
         now: Callable[[], datetime] | None = None,
     ) -> None:
         self.settings = settings or get_settings()
@@ -98,10 +84,10 @@ class RAGService:
         self.embeddings = embedding_service or build_embedding_service(self.settings)
         self.llm = llm_provider or build_llm_provider(self.settings)
         self.retriever = HybridRetriever(store, self.settings)
-        self.retrieval_cache = retrieval_cache or TTLCache[str, QueryResult](
-            self.settings.retrieval_cache_ttl_seconds
+        self.retrieval_cache: TTLCache[str, QueryResult] | RedisTTLCache[QueryResult] = (
+            retrieval_cache or TTLCache[str, QueryResult](self.settings.retrieval_cache_ttl_seconds)
         )
-        self.rate_limiter = rate_limiter or SlidingWindowRateLimiter(
+        self.rate_limiter: RateLimiter = rate_limiter or InMemoryRateLimiter(
             self.settings.rate_limit_requests_per_minute
         )
         self._now = now or (lambda: datetime.now(UTC))
@@ -173,6 +159,8 @@ class RAGService:
         data: bytes,
     ) -> tuple[DocumentRecord, IngestionJobRecord]:
         self._require_workspace_role(user_id, workspace_id, MembershipRole.editor)
+        # Uploads trigger parsing and paid embedding calls, so they share the per-user limit.
+        self.rate_limiter.check(f"{user_id}:{workspace_id}:ingest")
         parsed = parse_document_bytes(filename, content_type, data, settings=self.settings)
         duplicate = self.store.find_active_document_by_sha(workspace_id, parsed.sha256)
         if duplicate:

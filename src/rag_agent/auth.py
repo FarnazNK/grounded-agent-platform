@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import os
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -47,8 +48,13 @@ def create_access_token(user_id: str, settings: Settings | None = None) -> str:
     now = datetime.now(UTC)
     payload = {
         "sub": user_id,
+        "iss": settings.jwt_issuer,
+        "aud": settings.jwt_audience,
         "iat": int(now.timestamp()),
+        "nbf": int(now.timestamp()),
         "exp": int((now + timedelta(minutes=settings.jwt_access_token_ttl_minutes)).timestamp()),
+        # Unique token ID: lets a future denylist revoke a single token.
+        "jti": uuid.uuid4().hex,
     }
     return jwt.encode(payload, settings.jwt_secret, algorithm=settings.jwt_algorithm)
 
@@ -56,7 +62,16 @@ def create_access_token(user_id: str, settings: Settings | None = None) -> str:
 def decode_access_token(token: str, settings: Settings | None = None) -> dict[str, Any]:
     settings = settings or get_settings()
     try:
-        payload = jwt.decode(token, settings.jwt_secret, algorithms=[settings.jwt_algorithm])
+        payload = jwt.decode(
+            token,
+            settings.jwt_secret,
+            # Pin the algorithm list: never let the token header choose (e.g. "none").
+            algorithms=[settings.jwt_algorithm],
+            audience=settings.jwt_audience,
+            issuer=settings.jwt_issuer,
+            leeway=30,
+            options={"require": ["exp", "iat", "sub", "iss", "aud"]},
+        )
     except jwt.PyJWTError as exc:
         raise AuthenticationRequiredError("Invalid access token.") from exc
     if not payload.get("sub"):

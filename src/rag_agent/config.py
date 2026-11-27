@@ -4,10 +4,20 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Literal
 
-from pydantic import Field, model_validator
+from pydantic import AliasChoices, Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 ProjectRoot = Path(__file__).resolve().parents[2]
+
+# Secrets that appear in this repository's examples and must never reach staging/production.
+_PLACEHOLDER_SECRETS = frozenset(
+    {
+        "change-me-in-production",
+        "replace-with-at-least-32-random-bytes",
+        "local-development-secret-local-development-secret",
+        "ci-secret-ci-secret-ci-secret-ci-secret",
+    }
+)
 
 
 class Settings(BaseSettings):
@@ -16,15 +26,24 @@ class Settings(BaseSettings):
         env_file_encoding="utf-8",
         env_prefix="APP_",
         extra="ignore",
+        populate_by_name=True,
     )
 
-    app_env: Literal["dev", "staging", "production", "test"] = "dev"
+    # With env_prefix="APP_" this field would only be read from APP_APP_ENV, so APP_ENV
+    # (used by docker-compose and .env.example) was silently ignored and production checks
+    # never ran. Accept both; APP_APP_ENV wins so existing deployments keep their value.
+    app_env: Literal["dev", "staging", "production", "test"] = Field(
+        default="dev",
+        validation_alias=AliasChoices("APP_APP_ENV", "APP_ENV"),
+    )
     api_title: str = "RAG Agent API"
 
     database_url: str = "postgresql+psycopg://rag_agent@localhost:5432/rag_agent"
     jwt_secret: str = "change-me-in-production"
     jwt_algorithm: Literal["HS256"] = "HS256"
     jwt_access_token_ttl_minutes: int = Field(default=60, ge=5, le=1440)
+    jwt_issuer: str = "grounded-agent-platform"
+    jwt_audience: str = "rag-agent-api"
     enable_bootstrap_admin: bool = True
 
     llm_provider: Literal["anthropic", "openai", "deterministic"] = "deterministic"
@@ -61,6 +80,12 @@ class Settings(BaseSettings):
     request_timeout_seconds: float = Field(default=30.0, gt=0.0, le=300.0)
     rate_limit_requests_per_minute: int = Field(default=60, ge=1, le=100_000)
     auth_rate_limit_requests_per_minute: int = Field(default=10, ge=1, le=1_000)
+    # Optional shared state for multi-replica deployments (Redis or Valkey), e.g.
+    # rediss://:password@host:6379/0. Unset = per-process rate limits and cache.
+    redis_url: str | None = Field(default=None, repr=False)
+    # Number of trusted reverse proxies in front of the API. 0 = ignore X-Forwarded-For
+    # (safe default: the header is client-controlled and would let anyone dodge rate limits).
+    trusted_proxy_count: int = Field(default=0, ge=0, le=5)
     retrieval_cache_ttl_seconds: int = Field(default=120, ge=0, le=86_400)
     embedding_cache_ttl_seconds: int = Field(default=3600, ge=0, le=604_800)
 
@@ -91,9 +116,14 @@ class Settings(BaseSettings):
         if self.top_k_final > self.top_k_dense + self.top_k_sparse:
             raise ValueError("top_k_final cannot exceed the total retrieval candidate count")
         if self.app_env in {"staging", "production"}:
-            if self.jwt_secret == "change-me-in-production" or len(self.jwt_secret) < 32:
+            if (
+                self.jwt_secret in _PLACEHOLDER_SECRETS
+                or len(self.jwt_secret) < 32
+                or len(set(self.jwt_secret)) < 10
+            ):
                 raise ValueError(
-                    "staging/production requires a JWT secret of at least 32 characters"
+                    "staging/production requires a random JWT secret of at least 32 "
+                    "characters (e.g. python -c 'import secrets; print(secrets.token_urlsafe(48))')"
                 )
             if self.enable_bootstrap_admin:
                 raise ValueError("bootstrap admin must be disabled in staging/production")
