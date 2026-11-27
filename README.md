@@ -1,10 +1,14 @@
-# Grounded Agent Platform
+# Grounded Agent Platform — RAG API, LLM Evaluation & Policy-Controlled Coding Agent
+
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 [![CI](https://github.com/FarnazNK/grounded-agent-platform/actions/workflows/ci.yml/badge.svg)](https://github.com/FarnazNK/grounded-agent-platform/actions/workflows/ci.yml)
 [![Security](https://github.com/FarnazNK/grounded-agent-platform/actions/workflows/security.yml/badge.svg)](https://github.com/FarnazNK/grounded-agent-platform/actions/workflows/security.yml)
 [![Frontend build](https://github.com/FarnazNK/grounded-agent-platform/actions/workflows/frontend.yml/badge.svg)](https://github.com/FarnazNK/grounded-agent-platform/actions/workflows/frontend.yml)
 
-A multi-tenant RAG API and a policy-controlled coding agent. The model proposes; code outside the model decides what it may see, call and claim.
+An open-source Python/FastAPI reference project for building grounded AI agents: multi-tenant retrieval-augmented generation (RAG), PostgreSQL/pgvector hybrid search, citation validation, and policy-controlled coding tools. Explore how to evaluate retrieval quality, reduce unsupported answers, and enforce tool permissions in application code rather than prompts alone.
+
+**Useful for:** developers learning RAG architecture, LLM evaluation, agent security, or building a workspace-scoped AI assistant.
 
 [Web demo](https://grounded-agent-web.vercel.app) · [API docs](https://grounded-agent-api.vercel.app/docs)
 
@@ -97,7 +101,7 @@ CI runs the retrieval, groundedness, refusal, agent-context and latency gates on
 - **One Postgres for data, vectors and search:** one system to run and secure ([ADR 0002](docs/adr/0002-pgvector.md)).
 - **Policy in code, not prompts:** the reviewer agent can't write files even if its prompt is injected.
 - **Outputs are validated:** an answer must cite the documents it was given.
-- **Refuse on missing evidence:** if the retrieved text doesn't cover the question's key terms, the API declines before calling the model, so it can't guess and the call costs nothing.
+- **Refuse on missing evidence:** if the retrieved text doesn't cover the question's key terms, the API declines before calling the model, reducing unsupported responses and avoiding that model call.
 
 ## Limitations
 
@@ -108,3 +112,11 @@ CI runs the retrieval, groundedness, refusal, agent-context and latency gates on
 ## Docs
 
 [Architecture](docs/architecture.md) · [Developer agent](docs/developer-agent.md) · [Observability](docs/observability.md) · [Deployment](docs/deployment.md) · [Limitations](docs/limitations.md) · [Optional demos](docs/optional-demos.md)
+
+## Contributing
+
+Issues, reproducible bug reports and focused pull requests are welcome. If this project is useful to you, consider starring it so you can find it again.
+
+## License
+
+[MIT](LICENSE) — reuse and adapt the code under the terms of the license.
