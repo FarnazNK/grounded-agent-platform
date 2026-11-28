@@ -1,7 +1,7 @@
 from __future__ import annotations
 
+import re
 import time
-from collections import defaultdict, deque
 from contextlib import asynccontextmanager
 from functools import partial
 from uuid import uuid4
@@ -41,29 +41,67 @@ from rag_agent.api.schemas import (
     TokenResponse,
     WorkspaceListResponse,
 )
+from rag_agent.audit import audit_event, fingerprint
 from rag_agent.auth import decode_access_token
 from rag_agent.config import get_settings
 from rag_agent.db import get_session_factory, ping_database
-from rag_agent.errors import AppError, AuthenticationRequiredError, InvalidUploadError
+from rag_agent.errors import (
+    AppError,
+    AuthenticationRequiredError,
+    ErrorCode,
+    InvalidUploadError,
+)
 from rag_agent.observability import maybe_enable_langsmith, request_context
 from rag_agent.service import RAGService
+from rag_agent.shared_state import build_rate_limiter, build_redis_client, build_retrieval_cache
 from rag_agent.tracing import get_tracer
 
 security = HTTPBearer(auto_error=False)
-_auth_windows: dict[str, deque[float]] = defaultdict(deque)
+_REQUEST_ID_RE = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
+_SECURITY_DENIAL_CODES = {
+    ErrorCode.AUTHENTICATION_REQUIRED,
+    ErrorCode.AUTHORIZATION_FAILED,
+    ErrorCode.RATE_LIMIT_EXCEEDED,
+}
+# Swagger UI loads scripts from a CDN, so the strict CSP is applied everywhere except here.
+_DOCS_PATHS = ("/docs", "/redoc", "/openapi.json")
 
 
-def _enforce_auth_rate_limit(request: Request, limit: int) -> None:
-    now = time.monotonic()
-    key = request.client.host if request.client else "unknown"
-    events = _auth_windows[key]
-    while events and now - events[0] >= 60:
-        events.popleft()
-    if len(events) >= limit:
-        from rag_agent.errors import RateLimitExceededError
+def _safe_request_id(raw: str | None) -> str:
+    """Accept a caller-supplied request ID only if it is short and log-safe."""
+    if raw and _REQUEST_ID_RE.fullmatch(raw):
+        return raw
+    return str(uuid4())
 
-        raise RateLimitExceededError("Authentication rate limit exceeded.")
-    events.append(now)
+
+def client_ip(request: Request, trusted_proxy_count: int) -> str:
+    """Resolve the client address without trusting spoofable headers by default.
+
+    X-Forwarded-For is only read when the operator declares how many proxies sit in front of
+    the API; the address added by the outermost trusted proxy is then used.
+    """
+    if trusted_proxy_count > 0:
+        forwarded = request.headers.get("x-forwarded-for", "")
+        hops = [hop.strip() for hop in forwarded.split(",") if hop.strip()]
+        if len(hops) >= trusted_proxy_count:
+            return hops[-trusted_proxy_count]
+    return request.client.host if request.client else "unknown"
+
+
+def _apply_security_headers(request: Request, response: Response, production: bool) -> None:
+    headers = response.headers
+    headers.setdefault("X-Content-Type-Options", "nosniff")
+    headers.setdefault("X-Frame-Options", "DENY")
+    headers.setdefault("Referrer-Policy", "no-referrer")
+    headers.setdefault("Cross-Origin-Opener-Policy", "same-origin")
+    headers.setdefault("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
+    if not request.url.path.startswith(_DOCS_PATHS):
+        headers.setdefault("Content-Security-Policy", "default-src 'none'; frame-ancestors 'none'")
+    if request.url.path.startswith("/v1/"):
+        # Tenant data must never be stored by shared proxies or browser caches.
+        headers.setdefault("Cache-Control", "no-store")
+    if production:
+        headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
 
 
 @asynccontextmanager
@@ -75,7 +113,17 @@ async def _lifespan(app: FastAPI):
         app.state.settings = get_settings()
         app.state.langsmith_enabled = maybe_enable_langsmith()
         app.state.store = PostgresRAGStore(get_session_factory())
-        app.state.service = RAGService(app.state.store, settings=app.state.settings)
+        app.state.service = RAGService(
+            app.state.store,
+            settings=app.state.settings,
+            retrieval_cache=build_retrieval_cache(app.state.settings, client=app.state.redis),
+            rate_limiter=build_rate_limiter(
+                app.state.settings,
+                app.state.settings.rate_limit_requests_per_minute,
+                namespace="api",
+                client=app.state.redis,
+            ),
+        )
     yield
     get_tracer().flush()
 
@@ -83,6 +131,15 @@ async def _lifespan(app: FastAPI):
 def create_app(service: RAGService | None = None) -> FastAPI:
     settings = service.settings if service is not None else get_settings()
     app = FastAPI(title=settings.api_title, version="1.0.0", lifespan=_lifespan)
+    app.state.redis = build_redis_client(settings)
+    app.state.auth_rate_limiter = build_rate_limiter(
+        settings,
+        settings.auth_rate_limit_requests_per_minute,
+        namespace="auth",
+        message="Authentication rate limit exceeded.",
+        client=app.state.redis,
+    )
+    production = settings.app_env == "production"
     if service is not None:
         app.state.settings = settings
         app.state.langsmith_enabled = False
@@ -90,13 +147,23 @@ def create_app(service: RAGService | None = None) -> FastAPI:
         app.state.service = service
 
     @app.exception_handler(AppError)
-    async def handle_app_error(_: Request, exc: AppError) -> JSONResponse:
+    async def handle_app_error(request: Request, exc: AppError) -> JSONResponse:
         ERRORS.labels(code=exc.code.value).inc()
+        if exc.code in _SECURITY_DENIAL_CODES:
+            audit_event(
+                "request.denied",
+                outcome="denied",
+                client_ip=client_ip(request, settings.trusted_proxy_count),
+                method=request.method,
+                path=request.url.path,
+                reason=exc.code.value,
+            )
         return JSONResponse(status_code=exc.status_code, content=exc.to_dict())
 
     @app.middleware("http")
     async def metrics_middleware(request: Request, call_next):
-        request_id = request.headers.get("x-request-id") or str(uuid4())
+        request_id = _safe_request_id(request.headers.get("x-request-id"))
+        request.state.request_id = request_id
         start = time.perf_counter()
         status = "500"
         endpoint = request.url.path
@@ -109,6 +176,7 @@ def create_app(service: RAGService | None = None) -> FastAPI:
                 route = request.scope.get("route")
                 endpoint = getattr(route, "path", request.url.path)
                 response.headers["X-Request-ID"] = request_id
+                _apply_security_headers(request, response, production)
                 return response
         finally:
             ACTIVE_REQUESTS.dec()
@@ -117,6 +185,12 @@ def create_app(service: RAGService | None = None) -> FastAPI:
 
     def get_service() -> RAGService:
         return app.state.service
+
+    def _enforce_auth_rate_limit(request: Request) -> None:
+        # Keyed by client IP (see client_ip) and shared across replicas when Redis is set.
+        app.state.auth_rate_limiter.check(
+            f"auth:{client_ip(request, settings.trusted_proxy_count)}"
+        )
 
     def current_user(
         credentials: HTTPAuthorizationCredentials | None = Depends(security),
@@ -174,8 +248,15 @@ def create_app(service: RAGService | None = None) -> FastAPI:
         response_model=WorkspaceListResponse,
         responses={400: {"model": ErrorResponse}, 403: {"model": ErrorResponse}},
     )
-    def bootstrap(req: BootstrapRequest, svc: RAGService = Depends(get_service)):
+    def bootstrap(req: BootstrapRequest, request: Request, svc: RAGService = Depends(get_service)):
+        _enforce_auth_rate_limit(request)
         membership = svc.bootstrap_admin(**req.model_dump())
+        audit_event(
+            "auth.bootstrap_admin",
+            outcome="success",
+            workspace_id=membership.workspace.id,
+            client_ip=client_ip(request, settings.trusted_proxy_count),
+        )
         return WorkspaceListResponse(workspaces=[membership])
 
     @app.post(
@@ -188,11 +269,16 @@ def create_app(service: RAGService | None = None) -> FastAPI:
         request: Request,
         svc: RAGService = Depends(get_service),
     ):
-        _enforce_auth_rate_limit(
-            request,
-            app.state.settings.auth_rate_limit_requests_per_minute,
-        )
-        auth = svc.authenticate(req.email, req.password)
+        ip = client_ip(request, settings.trusted_proxy_count)
+        _enforce_auth_rate_limit(request)
+        try:
+            auth = svc.authenticate(req.email, req.password)
+        except AuthenticationRequiredError:
+            audit_event(
+                "auth.login", outcome="failure", client_ip=ip, email_fp=fingerprint(req.email)
+            )
+            raise
+        audit_event("auth.login", outcome="success", actor_id=auth.user.id, client_ip=ip)
         return TokenResponse(access_token=auth.access_token)
 
     @app.get("/v1/auth/me", response_model=MeResponse)
@@ -209,6 +295,7 @@ def create_app(service: RAGService | None = None) -> FastAPI:
     @app.post("/v1/documents/upload", response_model=DocumentResponse)
     async def upload_document(
         workspace_id: str,
+        request: Request,
         file: UploadFile = File(...),
         user=Depends(current_user),
         svc: RAGService = Depends(get_service),
@@ -235,6 +322,17 @@ def create_app(service: RAGService | None = None) -> FastAPI:
             INGESTION_FAILURES.labels(reason=exc.code.value).inc()
             raise
         INGESTION_JOBS.labels(operation="upload", status=job.status.value).inc()
+        audit_event(
+            "document.upload",
+            outcome="success" if job.status.value != "failed" else "failure",
+            actor_id=user.id,
+            workspace_id=workspace_id,
+            resource_id=document.id,
+            client_ip=client_ip(request, settings.trusted_proxy_count),
+            size_bytes=len(data),
+            sha256=document.sha256,
+            job_status=job.status.value,
+        )
         return DocumentResponse(document=DocumentView.model_validate(document), job=job)
 
     @app.get("/v1/documents", response_model=DocumentsResponse)
@@ -264,6 +362,7 @@ def create_app(service: RAGService | None = None) -> FastAPI:
     def reindex_document(
         document_id: str,
         workspace_id: str,
+        request: Request,
         user=Depends(current_user),
         svc: RAGService = Depends(get_service),
     ):
@@ -273,12 +372,22 @@ def create_app(service: RAGService | None = None) -> FastAPI:
             document_id=document_id,
         )
         INGESTION_JOBS.labels(operation="reindex", status=job.status.value).inc()
+        audit_event(
+            "document.reindex",
+            outcome="success",
+            actor_id=user.id,
+            workspace_id=workspace_id,
+            resource_id=document_id,
+            client_ip=client_ip(request, settings.trusted_proxy_count),
+            job_status=job.status.value,
+        )
         return DocumentResponse(document=DocumentView.model_validate(document), job=job)
 
     @app.delete("/v1/documents/{document_id}", response_model=DocumentResponse)
     def delete_document(
         document_id: str,
         workspace_id: str,
+        request: Request,
         user=Depends(current_user),
         svc: RAGService = Depends(get_service),
     ):
@@ -288,6 +397,15 @@ def create_app(service: RAGService | None = None) -> FastAPI:
             document_id=document_id,
         )
         INGESTION_JOBS.labels(operation="delete", status=job.status.value).inc()
+        audit_event(
+            "document.delete",
+            outcome="success",
+            actor_id=user.id,
+            workspace_id=workspace_id,
+            resource_id=document_id,
+            client_ip=client_ip(request, settings.trusted_proxy_count),
+            job_status=job.status.value,
+        )
         return DocumentResponse(document=DocumentView.model_validate(document), job=job)
 
     @app.get("/v1/ingestions/{job_id}", response_model=IngestionJobResponse)
@@ -311,12 +429,26 @@ def create_app(service: RAGService | None = None) -> FastAPI:
         user=Depends(current_user),
         svc: RAGService = Depends(get_service),
     ):
-        request_id = request.headers.get("x-request-id") or str(uuid4())
+        request_id = request.state.request_id
         result = svc.query(
             user_id=user.id,
             workspace_id=req.workspace_id,
             query=req.query,
             request_id=request_id,
+        )
+        # Record which documents were disclosed to whom; never the query or answer text.
+        audit_event(
+            "rag.query",
+            outcome="success",
+            actor_id=user.id,
+            workspace_id=req.workspace_id,
+            client_ip=client_ip(request, settings.trusted_proxy_count),
+            request_id=request_id,
+            query_fp=fingerprint(req.query),
+            sources=sorted({chunk.source_name for chunk in result.chunks}),
+            refusal=result.refusal,
+            grounded=result.grounded,
+            cached=result.cached,
         )
         if result.cached:
             CACHE_HITS.labels(cache="retrieval").inc()
@@ -344,7 +476,7 @@ def create_app(service: RAGService | None = None) -> FastAPI:
 
         if os.environ.get("ENABLE_AWS_AGENTCORE", "").lower() != "true":
             return JSONResponse(status_code=404, content={"error": "not_found"})
-        request_id = request.headers.get("x-request-id") or str(uuid4())
+        request_id = request.state.request_id
         result = svc.query(
             user_id=user.id,
             workspace_id=req.workspace_id,

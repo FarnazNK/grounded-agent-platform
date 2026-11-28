@@ -80,6 +80,7 @@ This is the expected citation format. Try the [web demo](https://grounded-agent-
 
 - **Tenant boundaries:** JWT authentication, workspace-role checks and workspace-scoped retrieval.
 - **Agent permissions:** read-only planner/reviewer roles, explicit write opt-in and constrained repository tools; **not an OS-level sandbox**.
+- **Abuse and audit:** login, query and upload rate limits (shared across replicas via optional Redis/Valkey), security headers, and structured audit events that never log query text. See [SECURITY.md](SECURITY.md#security-controls-in-the-api).
 - **Output checks:** PII redaction and citation validation; citations do not prove claim-level factual support.
 - **CI:** unit and PostgreSQL integration tests, lint/type checks, retrieval and adversarial evaluations, latency benchmark, dependency scanning and Docker build.
 

@@ -11,7 +11,7 @@ COPY pyproject.toml README.md alembic.ini ./
 COPY alembic ./alembic
 COPY src ./src
 COPY scripts ./scripts
-RUN pip install --upgrade pip && pip install --user .
+RUN pip install --upgrade pip && pip install --user '.[redis]'
 
 FROM python:3.11-slim AS runtime
 ENV PYTHONDONTWRITEBYTECODE=1 \
